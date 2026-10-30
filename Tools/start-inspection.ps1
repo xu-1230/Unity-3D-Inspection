@@ -117,6 +117,15 @@ function Test-PortBusy([int]$Port) {
     }
 }
 
+function Test-HttpOk([string]$Url) {
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 3 -ErrorAction Stop
+        return ($response.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
+}
+
 function Find-UnityEditors {
     $found = New-Object System.Collections.ArrayList
     $seen = @{}
@@ -354,8 +363,11 @@ function Invoke-UnityRun([bool]$Force) {
 function Start-BackendWindow {
     Write-Step "启动后端"
     if (Test-PortBusy $BackendPort) {
-        Write-Warn ("端口 {0} 已被占用，跳过后端启动。" -f $BackendPort)
-        Write-Hint "如需重启，先停止占用该端口的进程。"
+        if (Test-HttpOk "http://localhost:$BackendPort/api/health") {
+            Write-Ok ("后端已在运行，跳过启动：http://localhost:{0}" -f $BackendPort)
+        } else {
+            Write-Warn ("端口 {0} 被占用且健康检查失败，跳过后端启动。" -f $BackendPort)
+        }
         return
     }
 
@@ -368,8 +380,11 @@ function Start-BackendWindow {
 function Start-FrontendWindow {
     Write-Step "启动前端"
     if (Test-PortBusy $FrontendPort) {
-        Write-Warn ("端口 {0} 已被占用，跳过前端启动。" -f $FrontendPort)
-        Write-Hint "如需重启，先停止占用该端口的进程。"
+        if (Test-HttpOk "http://localhost:$FrontendPort/") {
+            Write-Ok ("前端已在运行，跳过启动：http://localhost:{0}" -f $FrontendPort)
+        } else {
+            Write-Warn ("端口 {0} 被占用且页面无法访问，跳过前端启动。" -f $FrontendPort)
+        }
         return
     }
 
@@ -388,8 +403,14 @@ function Invoke-Backend {
         New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
     }
     if (Test-PortBusy $BackendPort) {
-        Write-Warn ("端口 {0} 已被占用，可能已有后端在运行。" -f $BackendPort)
-        Write-Hint "关闭占用进程后重试，或直接访问 http://localhost:8080/api/health"
+        if (Test-HttpOk "http://localhost:$BackendPort/api/health") {
+            Write-Ok ("后端已在运行：http://localhost:{0}/api/health" -f $BackendPort)
+            Write-Hint ("需要重启时先结束占用该端口的进程：Get-NetTCPConnection -LocalPort {0} -State Listen" -f $BackendPort)
+            exit 0
+        }
+        Write-Err ("端口 {0} 被占用，但健康检查失败。" -f $BackendPort)
+        Write-Hint "占用该端口的可能不是本项目的后端，先结束该进程再重试。"
+        Write-Hint ("查看占用：Get-NetTCPConnection -LocalPort {0} -State Listen | Select-Object OwningProcess" -f $BackendPort)
         exit 1
     }
 
@@ -414,8 +435,14 @@ function Invoke-Frontend {
     Write-Ok ("Node: {0}" -f $node.Node)
 
     if (Test-PortBusy $FrontendPort) {
-        Write-Warn ("端口 {0} 已被占用，可能已有前端在运行。" -f $FrontendPort)
-        Write-Hint "关闭占用进程后重试，或直接访问 http://localhost:5173"
+        if (Test-HttpOk "http://localhost:$FrontendPort/") {
+            Write-Ok ("前端已在运行：http://localhost:{0}" -f $FrontendPort)
+            Write-Hint ("需要重启时先结束占用该端口的进程：Get-NetTCPConnection -LocalPort {0} -State Listen" -f $FrontendPort)
+            exit 0
+        }
+        Write-Err ("端口 {0} 被占用，但页面无法访问。" -f $FrontendPort)
+        Write-Hint "占用该端口的可能不是本项目的开发服务器，先结束该进程再重试。"
+        Write-Hint ("查看占用：Get-NetTCPConnection -LocalPort {0} -State Listen | Select-Object OwningProcess" -f $FrontendPort)
         exit 1
     }
 
