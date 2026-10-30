@@ -17,16 +17,14 @@
 | `Packages/` | 包依赖清单 `manifest.json`，由 Unity 生成 |
 | `ProjectSettings/` | 工程设置，由 Unity 生成 |
 
-## 初始化方式
+## 打开工程
 
-当前只提交了目录骨架与空占位文件，`Packages/`、`ProjectSettings/` 尚未生成。用 Unity Hub 以 LTS 版本新建 3D 工程后，把本目录的 `Assets` 内容迁入，或将工程生成物放到本目录下，即可作为独立工程使用。
+本目录已是完整工程根，含 `ProjectSettings/ProjectVersion.txt` 与 `Packages/manifest.json`。用根目录的 `start-unity.cmd` 或 Unity Hub 以 LTS 版本打开，然后执行菜单 `Tools > 生成巡检场景`，会生成并保存 `Assets/Scenes/Main.unity`，按 Play 即可点击设备上报。
 
-生成物（`Library/`、`Logs/`、`Temp/`、`obj/`、`*.csproj`、`*.sln`）已被仓库根目录的 `.gitignore` 忽略，不需要手动处理。
+工程版本记录为 `2022.3.0f1`；若本机是更高版本的 LTS，Hub 会提示升级，接受即可。
 
-## 开发约定
+首次打开后 Unity 会生成 `.meta` 与 `Library/`：`.meta` 属于工程资源需要提交，`Library/`、`Logs/`、`Temp/`、`obj/`、`*.csproj`、`*.sln` 已被根目录 `.gitignore` 忽略。
 
-- 脚本放在 `Assets/Scripts/`，一个脚本一个职责，避免把拾取、表单与网络请求写在同一文件。
-- 点击界面元素时不得触发射线检测，判定入口统一走 `EventSystem.current.IsPointerOverGameObject()`。
-- 场景中同一时刻只允许存在一个待提交标记，标记对象不挂载碰撞体。
-- 上报坐标为命中点的世界坐标，原样提交，不做单位换算。
-- 接口地址与字段以 [需求规格说明书](../docs/需求规格说明书.md) 第 5 章为准。
+## 技术规约
+
+场景构件、脚本分层、输入隔离、标记生命周期与上报规则见 [AGENT-unity整体技术规约.md](AGENT-unity整体技术规约.md)；跨端约束见 [AGENT-整体技术规约.md](../AGENT-整体技术规约.md)。

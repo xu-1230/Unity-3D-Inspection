@@ -1,11 +1,17 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
+
+	"unity-3d-inspection/backend/internal/api"
+	"unity-3d-inspection/backend/internal/store"
 )
 
 func main() {
@@ -13,24 +19,47 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	dataPath := os.Getenv("DATA_PATH")
+	if dataPath == "" {
+		dataPath = "data/issues.json"
+	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/health", handleHealth)
+	st, err := store.NewFileStore(dataPath)
+	if err != nil {
+		log.Fatalf("加载存储失败（%s）: %v", dataPath, err)
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           api.NewRouter(st),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Printf("backend listening on http://localhost:%s", port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("server stopped: %v", err)
-	}
-}
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("backend listening on http://localhost:%s (data=%s)", port, dataPath)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
 
-func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-errCh:
+		log.Fatalf("服务异常退出: %v", err)
+	case <-ctx.Done():
+		log.Println("收到退出信号，正在关闭服务")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("关闭失败: %v", err)
+	}
+	log.Println("backend stopped")
 }

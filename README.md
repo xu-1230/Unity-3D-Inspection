@@ -33,6 +33,8 @@
 ## 文档
 
 - [需求规格说明书](docs/需求规格说明书.md)：功能需求、接口契约、数据模型与状态机
+- [AGENT-整体技术规约.md](AGENT-整体技术规约.md)：全局技术约束与三端规约索引
+- [unity 技术规约](unity/AGENT-unity整体技术规约.md)、[frontend 技术规约](frontend/AGENT-frontend整体技术规约.md)、[backend 技术规约](backend/AGENT-backend整体技术规约.md)：各端的实现约束与验证清单
 - [CODEBUDDY.md](CODEBUDDY.md)：仓库开发约定
 
 ## 目录结构
@@ -51,6 +53,10 @@
 │   ├── cmd/server/       # 服务入口
 │   └── internal/         # api / model / store 分层
 ├── docs/                 # 需求规格说明书
+├── start-all.cmd         # 一键启动后端与前端
+├── start-backend.cmd     # 启动 Go 服务
+├── start-frontend.cmd    # 启动 React 开发服务器
+├── start-unity.cmd       # 打开 Unity 工程
 ├── 项目介绍.txt          # 项目背景与固定技术栈
 ├── CODEBUDDY.md          # 开发约定
 ├── README.md
@@ -61,13 +67,24 @@
 
 ## 快速开始
 
+双击或命令行执行仓库根目录的脚本：
+
+| 脚本 | 作用 |
+| --- | --- |
+| `start-all.cmd` | 探测端口后分别拉起后端与前端，并打开浏览器 |
+| `start-backend.cmd` | `go run ./cmd/server`，监听 `http://localhost:8080` |
+| `start-frontend.cmd` | 首次自动 `npm install`，随后 `npm run dev`，监听 `http://localhost:5173` |
+| `start-unity.cmd` | 用本机 Unity 编辑器打开 `unity/` 工程 |
+
+手动执行等价命令：
+
 ```bash
-# 后端
-cd backend && go run ./cmd/server        # http://localhost:8080/api/health
+# 后端（Go 位于 D:\ctf\go，脚本会自动前置到 PATH）
+cd backend && "D:\ctf\go\bin\go.exe" run ./cmd/server   # http://localhost:8080/api/health
 
 # 前端
-cd frontend && npm install && npm run dev # http://localhost:5173
+cd frontend && npm install && npm run dev                # http://localhost:5173
 
 # Unity 客户端
-# 用 Unity Hub 以 LTS 版本打开 unity/ 目录
+# 用 Unity Hub 以 LTS 版本打开 unity/，在菜单执行 Tools > 生成巡检场景
 ```
