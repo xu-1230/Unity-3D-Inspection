@@ -4,8 +4,10 @@
 #    start-all.cmd              拉起后端与前端并打开浏览器
 #    start-backend.cmd          只启动 Go 后端
 #    start-frontend.cmd         只启动 React 开发服务器
-#    start-unity.cmd            用本机 Unity 编辑器打开工程
-#    start-all.cmd check        检查本机依赖与端口占用
+#    start-unity.cmd            构建（如有需要）并运行独立包
+#    start-unity.cmd editor     打开 Unity 编辑器
+#    start-unity.cmd build      强制重新构建并运行
+#    start-all.cmd check        检查依赖、端口、场景与运行包
 # ------------------------------------------------------------------
 
 param(
@@ -20,6 +22,11 @@ $FrontendDir = Join-Path $Root "frontend"
 $UnityDir = Join-Path $Root "unity"
 $DataFile = Join-Path $BackendDir "data\issues.json"
 $ProjectVersionFile = Join-Path $UnityDir "ProjectSettings\ProjectVersion.txt"
+$ScenePath = Join-Path $UnityDir "Assets\Scenes\Main.unity"
+$BuildDir = Join-Path $UnityDir "Build"
+$ExePath = Join-Path $BuildDir "UnityInspection.exe"
+$BuildLog = Join-Path $Root "Logs\build.log"
+$BuildMethod = "Unity3DInspection.EditorTools.InspectionBuild.BuildFromCommandLine"
 $ScriptPath = $PSCommandPath
 
 $BackendPort = 8080
@@ -58,8 +65,10 @@ function Show-Usage {
     Write-Host "    start-all.cmd             拉起后端与前端并打开浏览器"
     Write-Host "    start-backend.cmd         只启动 Go 后端（8080）"
     Write-Host "    start-frontend.cmd        只启动 React 开发服务器（5173）"
-    Write-Host "    start-unity.cmd           打开 Unity 工程"
-    Write-Host "    start-all.cmd check       检查依赖、端口与数据文件"
+    Write-Host "    start-unity.cmd           构建（如有需要）并运行独立包"
+    Write-Host "    start-unity.cmd editor    打开 Unity 编辑器"
+    Write-Host "    start-unity.cmd build     强制重新构建并运行"
+    Write-Host "    start-all.cmd check       检查依赖、端口、场景与运行包"
     Write-Host ""
 }
 
@@ -193,6 +202,36 @@ function Select-UnityEditor([string]$ProjectVersion) {
     }
 }
 
+function Test-WindowsBuildModule([string]$UnityExe) {
+    if (-not $UnityExe) { return $false }
+    $editorDir = Split-Path -Parent $UnityExe
+    $moduleDir = Join-Path $editorDir "Data\PlaybackEngines\windowsstandalonesupport"
+    return (Test-Path -LiteralPath $moduleDir)
+}
+
+function Get-BuildStamp {
+    $stamp = Join-Path $BuildDir ".build-stamp"
+    if (Test-Path -LiteralPath $stamp) { return (Get-Item -LiteralPath $stamp).LastWriteTimeUtc }
+    if (Test-Path -LiteralPath $ExePath) { return (Get-Item -LiteralPath $ExePath).LastWriteTimeUtc }
+    return $null
+}
+
+function Test-BuildStale {
+    if (-not (Test-Path -LiteralPath $ExePath)) { return $true }
+    $reference = Get-BuildStamp
+    if (-not $reference) { return $true }
+
+    foreach ($dir in @((Join-Path $UnityDir "Assets"), (Join-Path $UnityDir "ProjectSettings"))) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        $newest = Get-ChildItem -LiteralPath $dir -Recurse -File -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Extension -ne ".meta" } |
+                  Sort-Object LastWriteTimeUtc -Descending |
+                  Select-Object -First 1
+        if ($newest -and $newest.LastWriteTimeUtc -gt $reference) { return $true }
+    }
+    return $false
+}
+
 function Assert-Go {
     $go = Resolve-Go
     if (-not $go) {
@@ -214,6 +253,102 @@ function Assert-Node {
         exit 2
     }
     return $node
+}
+
+function Assert-Unity {
+    $projectVersion = Get-ProjectVersion
+    $selection = Select-UnityEditor -ProjectVersion $projectVersion
+    if (-not $selection) {
+        Write-Err "未找到 Unity 编辑器，无法构建或打开工程。"
+        Write-Hint "安装 Unity Hub 与 Unity 2022.3 LTS：https://unity.com/download"
+        Write-Hint "或设置环境变量 UNITY_EXE 指向 Unity.exe 后重试。"
+        exit 2
+    }
+    return $selection
+}
+
+function Start-Exe {
+    if (-not (Test-Path -LiteralPath $ExePath)) {
+        Write-Err "运行包不存在：$ExePath"
+        Write-Hint "先执行 start-unity.cmd build 构建一次。"
+        exit 1
+    }
+    Write-Step "启动运行包"
+    Start-Process -FilePath $ExePath -WorkingDirectory $BuildDir
+    Write-Ok "已启动，窗口标题为「Unity-3D巡检」"
+}
+
+function Invoke-UnityBuild($Selection) {
+    if (-not (Test-WindowsBuildModule $Selection.Path)) {
+        Write-Err "缺少 Windows Build Support 模块，无法构建运行包。"
+        Write-Hint "在 Unity Hub 中为该版本安装 Windows Build Support (Mono)。"
+        Write-Hint "或改用 start-unity.cmd editor 打开编辑器按 Play。"
+        return $false
+    }
+
+    $logDir = Split-Path -Parent $BuildLog
+    if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
+    if (Test-Path -LiteralPath $BuildLog) { Remove-Item -LiteralPath $BuildLog -Force }
+
+    Write-Step "构建 Windows 运行包"
+    Write-Hint ("编辑器：{0}" -f $Selection.Version)
+    Write-Hint ("日志  ：{0}" -f $BuildLog)
+    Write-Hint "首次构建需要数分钟，请勿关闭窗口。"
+
+    $arguments = '-batchmode -quit -nographics -projectPath "{0}" -executeMethod {1} -logFile "{2}"' -f $UnityDir, $BuildMethod, $BuildLog
+    $process = Start-Process -FilePath $Selection.Path -ArgumentList $arguments -NoNewWindow -Wait -PassThru
+
+    if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $ExePath)) {
+        Write-Err ("构建失败（退出码 {0}）" -f $process.ExitCode)
+        if (Test-Path -LiteralPath $BuildLog) {
+            Write-Hint "日志最后 20 行："
+            Get-Content -LiteralPath $BuildLog -Tail 20 | ForEach-Object { Write-Host ("        " + $_) -ForegroundColor DarkGray }
+        }
+        return $false
+    }
+
+    New-Item -ItemType File -Path (Join-Path $BuildDir ".build-stamp") -Force | Out-Null
+    Write-Ok ("构建完成：{0}" -f $ExePath)
+    return $true
+}
+
+function Open-UnityEditor($Selection, [string]$ProjectVersion) {
+    Write-Ok ("编辑器: {0}" -f $Selection.Version)
+    Write-Hint ("路径  : {0}" -f $Selection.Path)
+    if ($ProjectVersion -and -not $Selection.Matched) {
+        Write-Warn ("工程版本 {0} 与编辑器 {1} 不一致，Unity 会提示升级，确认即可。" -f $ProjectVersion, $Selection.Version)
+    }
+
+    Write-Step "打开工程"
+    Start-Process -FilePath $Selection.Path -ArgumentList ('-projectPath "{0}"' -f $UnityDir)
+    Write-Ok "编辑器启动中。"
+    Write-Hint "打开 Assets/Scenes/Main.unity 后按 Play。"
+    exit 0
+}
+
+function Invoke-UnityRun([bool]$Force) {
+    $projectVersion = Get-ProjectVersion
+    $selection = Assert-Unity
+
+    Write-Ok ("编辑器: {0}" -f $selection.Version)
+    Write-Hint ("路径  : {0}" -f $selection.Path)
+    if ($projectVersion -and -not $selection.Matched) {
+        Write-Warn ("工程版本 {0} 与编辑器 {1} 不一致，Unity 首次打开时会提示升级，确认即可。" -f $projectVersion, $selection.Version)
+    }
+
+    if (-not $Force -and -not (Test-BuildStale)) {
+        Write-Ok "运行包已是最新，直接启动。"
+        Start-Exe
+        exit 0
+    }
+
+    if (Invoke-UnityBuild $selection) {
+        Start-Exe
+        exit 0
+    }
+
+    Write-Warn "构建失败，改为打开编辑器，可手动按 Play 运行。"
+    Open-UnityEditor $selection $projectVersion
 }
 
 function Start-BackendWindow {
@@ -311,30 +446,6 @@ function Invoke-Frontend {
     exit $code
 }
 
-function Invoke-Unity {
-    $projectVersion = Get-ProjectVersion
-    $selection = Select-UnityEditor -ProjectVersion $projectVersion
-
-    if (-not $selection) {
-        Write-Err "未找到 Unity 编辑器，无法打开工程。"
-        Write-Hint "安装 Unity Hub 与 Unity 2022.3 LTS：https://unity.com/download"
-        Write-Hint "或设置环境变量 UNITY_EXE 指向 Unity.exe 后重试。"
-        exit 2
-    }
-
-    Write-Ok ("编辑器: {0}" -f $selection.Version)
-    Write-Hint ("路径  : {0}" -f $selection.Path)
-    if ($projectVersion -and -not $selection.Matched) {
-        Write-Warn ("工程版本 {0} 与编辑器 {1} 不一致，Unity 会提示升级，确认即可。" -f $projectVersion, $selection.Version)
-    }
-
-    Write-Step "打开工程"
-    Start-Process -FilePath $selection.Path -ArgumentList ('-projectPath "{0}"' -f $UnityDir)
-    Write-Ok "编辑器启动中。"
-    Write-Hint "首次导入完成后，执行菜单 Tools > 生成巡检场景，再按 Play。"
-    exit 0
-}
-
 function Show-Check {
     Write-Step "环境检查"
 
@@ -366,6 +477,13 @@ function Show-Check {
         Write-Ok ("Unity     : {0}" -f $selection.Version)
         Write-Hint ("路径      : {0}" -f $selection.Path)
         Write-Hint ("工程版本  : {0}，匹配：{1}" -f $(if ($projectVersion) { $projectVersion } else { "未声明" }), $matchText)
+
+        if (Test-WindowsBuildModule $selection.Path) {
+            Write-Ok "打包模块  : Windows Build Support 已安装"
+        } else {
+            Write-Warn "打包模块  : 缺少 Windows Build Support，无法构建运行包"
+            Write-Hint "在 Unity Hub 中为该版本安装 Windows Build Support (Mono)"
+        }
     } else {
         Write-Warn "Unity     : 未找到（客户端只能手工打开）"
         Write-Hint "可设置环境变量 UNITY_EXE 指向 Unity.exe"
@@ -381,10 +499,20 @@ function Show-Check {
         Write-Warn "数据文件  : 尚未创建，首次上报后生成"
     }
 
-    if (Test-Path -LiteralPath (Join-Path $UnityDir "Assets\Scenes\Main.unity")) {
+    if (Test-Path -LiteralPath $ScenePath) {
         Write-Ok "巡检场景  : 已生成"
     } else {
-        Write-Warn "巡检场景  : 尚未生成（执行菜单 Tools > 生成巡检场景）"
+        Write-Warn "巡检场景  : 尚未生成（首次构建会自动生成）"
+    }
+
+    if (Test-Path -LiteralPath $ExePath) {
+        if (Test-BuildStale) {
+            Write-Warn ("运行包    : 已存在但已过期（{0}）" -f $ExePath)
+        } else {
+            Write-Ok ("运行包    : 已是最新（{0}）" -f $ExePath)
+        }
+    } else {
+        Write-Warn "运行包    : 尚未构建（执行 start-unity.cmd）"
     }
     Write-Host ""
 }
@@ -392,7 +520,6 @@ function Show-Check {
 # ---------------------------------------------------------------- 主流程
 
 $Action = $Action.ToLowerInvariant()
-if ($Action -eq "run") { $Action = "all" }
 
 Write-Title
 
@@ -410,9 +537,22 @@ switch ($Action) {
         Write-Host ("  目录: {0}" -f $FrontendDir) -ForegroundColor Gray
         Invoke-Frontend
     }
+    "run" {
+        Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
+        Invoke-UnityRun $false
+    }
     "unity" {
-        Write-Host ("  目录: {0}" -f $UnityDir) -ForegroundColor Gray
-        Invoke-Unity
+        Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
+        Invoke-UnityRun $false
+    }
+    "build" {
+        Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
+        Invoke-UnityRun $true
+    }
+    "editor" {
+        Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
+        $selection = Assert-Unity
+        Open-UnityEditor $selection (Get-ProjectVersion)
     }
     "all" {
         $go = Assert-Go

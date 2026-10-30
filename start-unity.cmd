@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set "ACTION=unity"
+set "ACTION=run"
 if not "%~1"=="" set "ACTION=%~1"
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\start-inspection.ps1" %ACTION%
 set "EXITCODE=%ERRORLEVEL%"

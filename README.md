@@ -74,8 +74,10 @@
 | `start-all.cmd` | 探测端口后分别拉起后端与前端，并打开浏览器 |
 | `start-backend.cmd` | `go run ./cmd/server`，监听 `http://localhost:8080` |
 | `start-frontend.cmd` | 首次自动 `npm install`，随后 `npm run dev`，监听 `http://localhost:5173` |
-| `start-unity.cmd` | 用本机 Unity 编辑器打开 `unity/` 工程 |
-| `start-all.cmd check` | 检查 Go / Node / Unity、端口占用、数据文件与场景 |
+| `start-unity.cmd` | 构建（源码有变化时）并运行独立包 `unity/Build/UnityInspection.exe` |
+| `start-unity.cmd build` | 强制重新构建再运行 |
+| `start-unity.cmd editor` | 打开 Unity 编辑器 |
+| `start-all.cmd check` | 检查 Go / Node / Unity、打包模块、端口、数据文件与运行包 |
 
 四个脚本都只是薄封装，实际逻辑在 `Tools/start-inspection.ps1`：输出分级为 `[OK]` / `[!!]` / `[XX]`，错误信息附带可操作提示，失败时返回非零退出码（依赖缺失为 2，运行失败为 1）。
 
