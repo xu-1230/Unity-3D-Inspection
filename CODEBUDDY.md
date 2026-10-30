@@ -20,9 +20,10 @@
 
 三端目录已就位，命令在各自目录内执行：
 
-- **Unity**：用 Unity Hub 以 LTS 版本打开 `unity/`，或 `Unity -projectPath unity -executeMethod Builder.Build` 做批处理构建（需工程内存在该方法）。命令行跑测试前先确认是否安装了 Unity Test Framework。
-- **后端**：在 `backend/` 内 `go run ./cmd/server` 启动；`go build ./...` 编译检查；`go test ./...` 全量测试，单测用 `go test ./internal/<pkg> -run TestName`；`go vet ./...` 静态检查。
-- **管理端**：在 `frontend/` 内 `npm install` → `npm run dev`（5173 端口），`npm run build` 做类型检查并产出 `dist/`，`npm run preview` 预览产物。暂无 lint 与测试脚本，新增时以 `package.json` 中实际脚本为准。
+- **启动脚本**：根目录 `start-all.cmd` 拉起后端与前端，`start-backend.cmd`、`start-frontend.cmd`、`start-unity.cmd` 单独启动某一端；脚本会把 `D:\ctf\go\bin` 前置到 PATH。
+- **Unity**：用 `start-unity.cmd` 或 Unity Hub 打开 `unity/`，菜单 `Tools > 生成巡检场景` 生成 `Assets/Scenes/Main.unity`。命令行跑测试前先确认是否安装了 Unity Test Framework。
+- **后端**：Go 装在 `D:\ctf\go`（未加入系统 PATH，用 `D:\ctf\go\bin\go.exe`）。在 `backend/` 内 `go run ./cmd/server` 启动；`go vet ./...`；`go build ./...`；`go test ./...`，单测用 `go test ./internal/<pkg> -run TestName`。
+- **管理端**：在 `frontend/` 内 `npm install` → `npm run dev`（5173 端口，`/api` 代理到 8080），`npm run build` 做类型检查并产出 `dist/`，`npm run preview` 预览产物。暂无 lint 与测试脚本，新增时以 `package.json` 中实际脚本为准。
 
 ## 架构（三端一条数据链路）
 
@@ -45,7 +46,7 @@
 - `frontend/`：React + TypeScript 工程（`src/api`、`src/components`、`src/pages`、`src/types`），接口调用集中在 `src/api/client.ts`。
 - `backend/`：Go 服务，`cmd/server` 为入口，`internal/api`（路由与校验）、`internal/model`（实体与枚举）、`internal/store`（持久化接口）三层分离，使 SQLite 与 JSON 文件实现可互换。
 
-各目录的 `README.md` 记录该端用途与目录说明，新增子目录时同步更新。
+各目录的 `README.md` 记录该端用途与目录说明，新增子目录时同步更新。技术约束集中在 `AGENT-整体技术规约.md`（全局）与各端的 `AGENT-<端>整体技术规约.md`，README 与本节不重复其内容。
 
 ## 修改时的注意事项
 

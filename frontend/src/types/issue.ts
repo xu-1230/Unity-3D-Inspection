@@ -28,3 +28,18 @@ export interface CreateIssueInput {
   priority: IssuePriority;
   location: IssueLocation;
 }
+
+/** 展示文案的唯一映射处，取值顺序与后端枚举一致。 */
+export const PRIORITY_LABELS: Record<IssuePriority, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+};
+
+export const STATUS_LABELS: Record<IssueStatus, string> = {
+  open: '待处理',
+  in_progress: '处理中',
+  resolved: '已解决',
+};
+
+export const STATUS_OPTIONS: IssueStatus[] = ['open', 'in_progress', 'resolved'];
