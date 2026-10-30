@@ -18,11 +18,11 @@
 
 ## 常用命令
 
-以下命令为三端各自生态的标准入口，在对应子项目生成后使用：
+三端目录已就位，命令在各自目录内执行：
 
-- **Unity**：用 Unity Hub 以 LTS 版本打开客户端工程目录，或 `Unity -projectPath <client> -executeMethod Builder.Build` 做批处理构建（需工程内存在该方法）。不接受命令行跑测试前先确认是否安装了 Unity Test Framework。
-- **后端**：`go run ./cmd/server` 启动；`go build ./...` 编译检查；`go test ./...` 全量测试，单测用 `go test ./internal/<pkg> -run TestName`；`go vet ./...` 静态检查。
-- **管理端**：`npm install` → `npm run dev` 本地开发，`npm run build` 产出，`npm run lint` 检查。单测执行 `npm test -- <pattern>`；若引入了 Vitest/Jest，以 `package.json` 中实际脚本为准。
+- **Unity**：用 Unity Hub 以 LTS 版本打开 `unity/`，或 `Unity -projectPath unity -executeMethod Builder.Build` 做批处理构建（需工程内存在该方法）。命令行跑测试前先确认是否安装了 Unity Test Framework。
+- **后端**：在 `backend/` 内 `go run ./cmd/server` 启动；`go build ./...` 编译检查；`go test ./...` 全量测试，单测用 `go test ./internal/<pkg> -run TestName`；`go vet ./...` 静态检查。
+- **管理端**：在 `frontend/` 内 `npm install` → `npm run dev`（5173 端口），`npm run build` 做类型检查并产出 `dist/`，`npm run preview` 预览产物。暂无 lint 与测试脚本，新增时以 `package.json` 中实际脚本为准。
 
 ## 架构（三端一条数据链路）
 
@@ -39,7 +39,13 @@
 
 ## 目录约定
 
-子项目按端平行放置（如 `client/`（Unity）、`backend/`、`admin/`）。后端内部建议 `cmd/server`（入口）+ `internal/`（handler、store、model）分层，使存储实现可替换；管理端 API 调用集中在一处，避免散落在组件里。
+三端按目录平行放置，互不引用对方的源码：
+
+- `unity/`：Unity 工程根（`Assets/Scripts|Scenes|Prefabs|Materials`、`Packages/`、`ProjectSettings/`），C# 脚本按职责拆分。
+- `frontend/`：React + TypeScript 工程（`src/api`、`src/components`、`src/pages`、`src/types`），接口调用集中在 `src/api/client.ts`。
+- `backend/`：Go 服务，`cmd/server` 为入口，`internal/api`（路由与校验）、`internal/model`（实体与枚举）、`internal/store`（持久化接口）三层分离，使 SQLite 与 JSON 文件实现可互换。
+
+各目录的 `README.md` 记录该端用途与目录说明，新增子目录时同步更新。
 
 ## 修改时的注意事项
 
