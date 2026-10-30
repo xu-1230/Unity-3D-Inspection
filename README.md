@@ -39,6 +39,17 @@
 
 ```
 .
+├── unity/                # Unity 客户端：存虚拟场景、C# 脚本、预制体与工程设置
+│   ├── Assets/           # Scripts / Scenes / Prefabs / Materials
+│   ├── Packages/         # 包依赖清单（由 Unity 生成）
+│   └── ProjectSettings/  # 工程设置（由 Unity 生成）
+├── frontend/             # 前端代码：React + TypeScript 管理端，问题列表与状态修改
+│   ├── src/              # api / components / pages / types
+│   ├── index.html
+│   └── package.json
+├── backend/              # 后端服务代码：Go 接口、参数校验与持久化
+│   ├── cmd/server/       # 服务入口
+│   └── internal/         # api / model / store 分层
 ├── docs/                 # 需求规格说明书
 ├── 项目介绍.txt          # 项目背景与固定技术栈
 ├── CODEBUDDY.md          # 开发约定
@@ -46,4 +57,17 @@
 └── .gitignore
 ```
 
-客户端、后端与管理端的工程目录将在实现阶段加入。
+三端目录相互独立，不共享源码，只通过 HTTP 接口与同一份后端数据交互。各目录内的 `README.md` 记录该端的用途、目录说明与命令。
+
+## 快速开始
+
+```bash
+# 后端
+cd backend && go run ./cmd/server        # http://localhost:8080/api/health
+
+# 前端
+cd frontend && npm install && npm run dev # http://localhost:5173
+
+# Unity 客户端
+# 用 Unity Hub 以 LTS 版本打开 unity/ 目录
+```
