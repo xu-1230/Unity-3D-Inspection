@@ -99,8 +99,14 @@ function Resolve-Go {
 }
 
 function Resolve-Node {
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $node) { $node = Get-Command node -ErrorAction SilentlyContinue }
+
+    # 优先 npm.cmd：npm.ps1 依赖 $MyInvocation.Statement 反解参数，
+    # 在脚本里用 & $var 调用时会错位成「Unknown command」。
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+
     if ($node -and $npm) {
         return [pscustomobject]@{ Node = $node.Source; Npm = $npm.Source }
     }
@@ -446,11 +452,13 @@ function Invoke-Frontend {
         exit 1
     }
 
+    $npmPath = $node.Npm
+
     Push-Location $FrontendDir
     try {
         if (-not (Test-Path -LiteralPath (Join-Path $FrontendDir "node_modules"))) {
             Write-Step "安装前端依赖"
-            & $node.Npm install --no-audit --no-fund
+            & $npmPath install --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
                 Write-Err "npm install 失败。"
                 Write-Hint "检查网络或代理后，手动执行：cd frontend && npm install"
@@ -462,7 +470,7 @@ function Invoke-Frontend {
         Write-Step "运行 npm run dev"
         Write-Hint "/api 请求会转发到 http://localhost:8080"
         Write-Hint "按 Ctrl+C 停止服务。"
-        & $node.Npm run dev
+        & $npmPath run dev
         $code = $LASTEXITCODE
     } finally {
         Pop-Location
@@ -490,7 +498,7 @@ function Show-Check {
     if ($node) {
         $nodeVersion = (& $node.Node --version) 2>$null
         Write-Ok ("Node      : {0}" -f $nodeVersion)
-        Write-Hint ("npm       : {0}" -f (& $node.Npm --version))
+        Write-Hint ("npm       : {0}（{1}）" -f (& $node.Npm --version), $node.Npm)
     } else {
         Write-Err "Node      : 未找到（前端无法启动）"
         Write-Hint "需要 Node.js 20+：https://nodejs.org/"
