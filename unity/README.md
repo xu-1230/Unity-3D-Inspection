@@ -19,9 +19,11 @@
 
 ## 打开工程
 
-本目录已是完整工程根，含 `ProjectSettings/ProjectVersion.txt` 与 `Packages/manifest.json`。用根目录的 `start-unity.cmd` 或 Unity Hub 以 LTS 版本打开，然后执行菜单 `Tools > 生成巡检场景`，会生成并保存 `Assets/Scenes/Main.unity`，按 Play 即可点击设备上报。
+本目录已是完整工程根，含 `ProjectSettings/ProjectVersion.txt` 与 `Packages/manifest.json`。用根目录的 `start-unity.cmd` 或 Unity Hub 打开 `Assets/Scenes/Main.unity`，按 Play 即可点击设备上报。
 
-工程版本记录为 `2022.3.0f1`；若本机是更高版本的 LTS，Hub 会提示升级，接受即可。
+场景已随仓库提供；需要重建时执行菜单 `Tools > 生成巡检场景`，会覆盖保存 `Assets/Scenes/Main.unity`。
+
+工程版本记录为 `2022.3.62f3c1`，与当前开发机的编辑器一致；换用其他 LTS 版本时 Hub 会提示升级，接受即可。
 
 首次打开后 Unity 会生成 `.meta` 与 `Library/`：`.meta` 属于工程资源需要提交，`Library/`、`Logs/`、`Temp/`、`obj/`、`*.csproj`、`*.sln` 已被根目录 `.gitignore` 忽略。
 

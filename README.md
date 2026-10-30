@@ -75,6 +75,9 @@
 | `start-backend.cmd` | `go run ./cmd/server`，监听 `http://localhost:8080` |
 | `start-frontend.cmd` | 首次自动 `npm install`，随后 `npm run dev`，监听 `http://localhost:5173` |
 | `start-unity.cmd` | 用本机 Unity 编辑器打开 `unity/` 工程 |
+| `start-all.cmd check` | 检查 Go / Node / Unity、端口占用、数据文件与场景 |
+
+四个脚本都只是薄封装，实际逻辑在 `Tools/start-inspection.ps1`：输出分级为 `[OK]` / `[!!]` / `[XX]`，错误信息附带可操作提示，失败时返回非零退出码（依赖缺失为 2，运行失败为 1）。
 
 手动执行等价命令：
 

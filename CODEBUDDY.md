@@ -20,7 +20,7 @@
 
 三端目录已就位，命令在各自目录内执行：
 
-- **启动脚本**：根目录 `start-all.cmd` 拉起后端与前端，`start-backend.cmd`、`start-frontend.cmd`、`start-unity.cmd` 单独启动某一端；脚本会把 `D:\ctf\go\bin` 前置到 PATH。
+- **启动脚本**：根目录四个 `.cmd` 是薄封装，逻辑在 `Tools/start-inspection.ps1`（UTF-8 BOM，PS 5.1 才能正确解析中文）。动作为 `all` / `backend` / `frontend` / `unity` / `check`；输出用 `[OK]` / `[!!]` / `[XX]` 分级，依赖缺失返回 2，运行失败返回 1。
 - **Unity**：用 `start-unity.cmd` 或 Unity Hub 打开 `unity/`，菜单 `Tools > 生成巡检场景` 生成 `Assets/Scenes/Main.unity`。命令行跑测试前先确认是否安装了 Unity Test Framework。
 - **后端**：Go 装在 `D:\ctf\go`（未加入系统 PATH，用 `D:\ctf\go\bin\go.exe`）。在 `backend/` 内 `go run ./cmd/server` 启动；`go vet ./...`；`go build ./...`；`go test ./...`，单测用 `go test ./internal/<pkg> -run TestName`。
 - **管理端**：在 `frontend/` 内 `npm install` → `npm run dev`（5173 端口，`/api` 代理到 8080），`npm run build` 做类型检查并产出 `dist/`，`npm run preview` 预览产物。暂无 lint 与测试脚本，新增时以 `package.json` 中实际脚本为准。
