@@ -1,5 +1,8 @@
-export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+/**
+ * 后端基址。留空表示走同源相对路径，由 Vite 的 /api 代理转发到后端；
+ * 需要直连非本机地址时通过 VITE_API_BASE_URL 覆盖。
+ */
+export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '';
 
 interface ErrorBody {
   error?: { code?: string; message?: string; field?: string };
