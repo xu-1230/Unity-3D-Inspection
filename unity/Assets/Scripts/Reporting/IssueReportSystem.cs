@@ -1,0 +1,644 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+namespace VirtualInspection.Reporting
+{
+    /// <summary>
+    /// 点击上报与问题查看：
+    /// 启动时从后端拉取全部问题并还原标记；准星指向标记会发光，点击标记查看问题信息；
+    /// 准星指向其他表面时左键新建上报。
+    /// </summary>
+    public class IssueReportSystem : MonoBehaviour
+    {
+        private const float MaxPickDistance = 45f;
+        private const float MarkerDiameter = 0.3f;
+
+        private static readonly Color PanelColor = new Color(0.031f, 0.043f, 0.059f, 0.96f);
+        private static readonly Color FieldColor = new Color(0.09f, 0.11f, 0.14f, 0.98f);
+        private static readonly Color AccentColor = new Color(0.26f, 0.52f, 0.96f, 1f);
+        private static readonly Color IdleColor = new Color(0.18f, 0.21f, 0.26f, 1f);
+        private static readonly Color ErrorColor = new Color(1f, 0.45f, 0.42f, 1f);
+        private static readonly Color NeutralColor = new Color(0.82f, 0.84f, 0.86f, 1f);
+        private static readonly Color MarkerColor = new Color(0.97f, 0.35f, 0.28f, 1f);
+        private static readonly Color MarkerGlow = new Color(0.55f, 0.85f, 1f, 1f);
+
+        /// <summary>任一弹窗（上报表单 / 问题详情）打开时置为 true，供巡检系统让出输入。</summary>
+        public static bool IsFormOpen { get; private set; }
+
+        private class MarkerRecord
+        {
+            public string Id;
+            public string Title;
+            public string Description;
+            public string Priority;
+            public string Status;
+            public string CreatedAt;
+            public Vector3 Position;
+            public GameObject Marker;
+            public Material Material;
+        }
+
+        private FirstPersonPlayer player;
+        private IssueApiClient apiClient;
+        private Camera viewCamera;
+
+        private RectTransform formPanel;
+        private InputField titleInput;
+        private InputField descriptionInput;
+        private Text coordText;
+        private Text statusText;
+        private Button submitButton;
+        private Button cancelButton;
+        private readonly Dictionary<string, Button> priorityButtons = new Dictionary<string, Button>();
+
+        private RectTransform infoPanel;
+        private Text infoTitle;
+        private Text infoMeta;
+        private Text infoDescription;
+        private Text infoCoord;
+        private Text infoHint;
+
+        private readonly List<MarkerRecord> markers = new List<MarkerRecord>();
+        private readonly Dictionary<GameObject, MarkerRecord> markerIndex = new Dictionary<GameObject, MarkerRecord>();
+        private MarkerRecord hovered;
+        private MarkerRecord infoRecord;
+        private GameObject pendingMarker;
+
+        private string priority = IssuePriorityLevel.Medium;
+        private Vector3 pendingPosition;
+        private bool submitting;
+
+        public void Setup(FirstPersonPlayer firstPersonPlayer)
+        {
+            player = firstPersonPlayer;
+            viewCamera = player != null ? player.ViewCamera : Camera.main;
+
+            apiClient = GetComponent<IssueApiClient>();
+            if (apiClient == null) apiClient = gameObject.AddComponent<IssueApiClient>();
+
+            BuildForm();
+            BuildInfoPanel();
+            HideForm();
+            HideInfo();
+        }
+
+        private void Start()
+        {
+            StartCoroutine(LoadExistingIssues());
+        }
+
+        private IEnumerator LoadExistingIssues()
+        {
+            yield return apiClient.FetchIssues(
+                items =>
+                {
+                    for (int i = 0; i < items.Length; i++)
+                    {
+                        IssueItem item = items[i];
+                        if (item == null || item.location == null) continue;
+                        CreateMarkerRecord(item.id, item.title, item.description, item.priority, item.status,
+                            item.createdAt, new Vector3(item.location.x, item.location.y, item.location.z));
+                    }
+
+                    Debug.Log("[上报] 已从后端还原问题标记 " + markers.Count + " 个");
+                },
+                error => Debug.LogWarning("[上报] 拉取历史问题失败：" + error));
+        }
+
+        private void Update()
+        {
+            UpdateMarkerGlow();
+
+            if (infoPanel != null && infoPanel.gameObject.activeSelf)
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) HideInfo();
+                return;
+            }
+
+            if (formPanel != null && formPanel.gameObject.activeSelf)
+            {
+                if (!submitting && Input.GetKeyDown(KeyCode.Escape)) Cancel();
+                return;
+            }
+
+            if (viewCamera == null && player != null) viewCamera = player.ViewCamera;
+            if (viewCamera == null) return;
+
+            if (Cursor.lockState != CursorLockMode.Locked)
+            {
+                SetHovered(null);
+                return;
+            }
+
+            Ray ray = viewCamera.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+            RaycastHit hit;
+            bool hasHit = Physics.Raycast(ray, out hit, MaxPickDistance, ~0, QueryTriggerInteraction.Ignore);
+
+            MarkerRecord target = hasHit ? FindMarker(hit.collider.gameObject) : null;
+            SetHovered(target);
+
+            if (!Input.GetMouseButtonDown(0)) return;
+
+            if (target != null)
+            {
+                ShowInfo(target);
+            }
+            else if (hasHit)
+            {
+                if (player != null && hit.collider != null && hit.collider.transform.IsChildOf(player.transform)) return;
+                OpenForm(hit.point);
+            }
+        }
+
+        // ------------------------------------------------------------ 标记
+
+        private MarkerRecord FindMarker(GameObject go)
+        {
+            if (go == null) return null;
+
+            MarkerRecord record;
+            if (markerIndex.TryGetValue(go, out record)) return record;
+
+            Transform parent = go.transform.parent;
+            while (parent != null)
+            {
+                if (markerIndex.TryGetValue(parent.gameObject, out record)) return record;
+                parent = parent.parent;
+            }
+
+            return null;
+        }
+
+        private MarkerRecord CreateMarkerRecord(string id, string title, string description, string issuePriority,
+            string status, string createdAt, Vector3 position)
+        {
+            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            marker.name = "问题标记 " + (string.IsNullOrEmpty(id) ? title : id);
+            marker.transform.SetParent(transform, false);
+            marker.transform.position = position;
+            marker.transform.localScale = Vector3.one * MarkerDiameter;
+
+            Renderer renderer = marker.GetComponent<Renderer>();
+            Material material = null;
+            if (renderer != null)
+            {
+                Shader shader = Shader.Find("Standard");
+                if (shader == null) shader = Shader.Find("Sprites/Default");
+                material = new Material(shader);
+                material.color = MarkerColor;
+                material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
+                renderer.material = material;
+            }
+
+            MarkerRecord record = new MarkerRecord
+            {
+                Id = id,
+                Title = title,
+                Description = description,
+                Priority = issuePriority,
+                Status = status,
+                CreatedAt = createdAt,
+                Position = position,
+                Marker = marker,
+                Material = material,
+            };
+
+            markers.Add(record);
+            markerIndex[marker] = record;
+            return record;
+        }
+
+        private void SetHovered(MarkerRecord record)
+        {
+            if (hovered == record) return;
+            hovered = record;
+        }
+
+        private void UpdateMarkerGlow()
+        {
+            float pulse = 1.1f + Mathf.Sin(Time.time * 4f) * 0.35f;
+
+            for (int i = 0; i < markers.Count; i++)
+            {
+                MarkerRecord record = markers[i];
+                if (record.Material == null) continue;
+
+                bool on = record == hovered;
+                record.Material.EnableKeyword("_EMISSION");
+                record.Material.SetColor("_EmissionColor", on ? MarkerGlow * pulse : Color.black);
+            }
+        }
+
+        // ------------------------------------------------------------ 上报表单
+
+        private void OpenForm(Vector3 worldPosition)
+        {
+            pendingPosition = worldPosition;
+
+            if (pendingMarker != null) Destroy(pendingMarker);
+            pendingMarker = CreatePendingMarker(worldPosition);
+
+            coordText.text = string.Format("坐标：({0:F2}, {1:F2}, {2:F2})", worldPosition.x, worldPosition.y, worldPosition.z);
+            SetStatus("填写后提交，按 Esc 取消", NeutralColor);
+
+            SetPriority(IssuePriorityLevel.Medium);
+            IsFormOpen = true;
+            formPanel.gameObject.SetActive(true);
+
+            if (player != null) player.SetControls(false);
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+            titleInput.ActivateInputField();
+        }
+
+        private GameObject CreatePendingMarker(Vector3 position)
+        {
+            GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            marker.name = "待提交标记";
+            marker.transform.SetParent(transform, false);
+            marker.transform.position = position;
+            marker.transform.localScale = Vector3.one * MarkerDiameter;
+
+            Collider collider = marker.GetComponent<Collider>();
+            if (collider != null) Destroy(collider);
+
+            Renderer renderer = marker.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                Shader shader = Shader.Find("Standard");
+                if (shader == null) shader = Shader.Find("Sprites/Default");
+                Material material = new Material(shader);
+                material.color = MarkerColor;
+                renderer.material = material;
+            }
+
+            return marker;
+        }
+
+        private void HideForm()
+        {
+            if (formPanel != null) formPanel.gameObject.SetActive(false);
+            IsFormOpen = false;
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+        }
+
+        private void Cancel()
+        {
+            if (pendingMarker != null)
+            {
+                Destroy(pendingMarker);
+                pendingMarker = null;
+            }
+
+            HideForm();
+            if (player != null) player.SetControls(true);
+        }
+
+        private void OnSubmitClicked()
+        {
+            if (submitting) return;
+
+            string title = titleInput.text != null ? titleInput.text.Trim() : string.Empty;
+            if (title.Length == 0)
+            {
+                SetStatus("标题不能为空", ErrorColor);
+                return;
+            }
+
+            IssuePayload payload = new IssuePayload
+            {
+                title = title,
+                description = descriptionInput.text ?? string.Empty,
+                priority = priority,
+                location = new IssueLocationDto
+                {
+                    x = pendingPosition.x,
+                    y = pendingPosition.y,
+                    z = pendingPosition.z,
+                },
+            };
+
+            StartCoroutine(Submit(payload));
+        }
+
+        private IEnumerator Submit(IssuePayload payload)
+        {
+            submitting = true;
+            submitButton.interactable = false;
+            cancelButton.interactable = false;
+            SetStatus("提交中…", NeutralColor);
+
+            bool finished = false;
+            string failure = null;
+            IssueResponse response = null;
+
+            yield return apiClient.CreateIssue(
+                payload,
+                created =>
+                {
+                    response = created;
+                    finished = true;
+                },
+                message =>
+                {
+                    failure = message;
+                    finished = true;
+                });
+
+            submitting = false;
+            submitButton.interactable = true;
+            cancelButton.interactable = true;
+
+            if (finished && failure == null)
+            {
+                string id = response != null ? response.id : string.Empty;
+                string status = response != null ? response.status : "open";
+
+                if (pendingMarker != null)
+                {
+                    Destroy(pendingMarker);
+                    pendingMarker = null;
+                }
+
+                CreateMarkerRecord(id, payload.title, payload.description, payload.priority, status,
+                    System.DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:ss"), pendingPosition);
+
+                titleInput.text = string.Empty;
+                descriptionInput.text = string.Empty;
+                HideForm();
+                if (player != null) player.SetControls(true);
+            }
+            else
+            {
+                SetStatus("提交失败：" + (failure ?? "未知错误"), ErrorColor);
+            }
+        }
+
+        private void SetStatus(string message, Color color)
+        {
+            statusText.text = message;
+            statusText.color = color;
+        }
+
+        private void SetPriority(string value)
+        {
+            priority = value;
+            foreach (KeyValuePair<string, Button> pair in priorityButtons)
+            {
+                bool selected = pair.Key == value;
+                Color baseColor = selected ? AccentColor : IdleColor;
+
+                // 鼠标停留在按钮上时显示的是 highlightedColor，必须一并改，否则选中态看不出来。
+                ColorBlock colors = pair.Value.colors;
+                colors.normalColor = baseColor;
+                colors.highlightedColor = selected ? baseColor : new Color(0.28f, 0.32f, 0.38f, 1f);
+                colors.pressedColor = baseColor;
+                colors.selectedColor = baseColor;
+                pair.Value.colors = colors;
+            }
+        }
+
+        // ------------------------------------------------------------ 问题详情
+
+        private void ShowInfo(MarkerRecord record)
+        {
+            infoRecord = record;
+            IsFormOpen = true;
+
+            infoTitle.text = record.Title;
+            infoMeta.text = "编号 " + (string.IsNullOrEmpty(record.Id) ? "未同步" : record.Id)
+                + "     优先级 " + IssuePriorityLevel.ToLabel(record.Priority)
+                + "     状态 " + IssuePriorityLevel.StatusLabel(record.Status);
+            infoDescription.text = string.IsNullOrEmpty(record.Description) ? "（无描述）" : record.Description;
+            infoCoord.text = string.Format("坐标：({0:F2}, {1:F2}, {2:F2})", record.Position.x, record.Position.y, record.Position.z);
+            infoHint.text = "正在核对最新状态…";
+
+            infoPanel.gameObject.SetActive(true);
+            if (player != null) player.SetControls(false);
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+
+            if (!string.IsNullOrEmpty(record.Id)) StartCoroutine(RefreshStatus(record));
+        }
+
+        private IEnumerator RefreshStatus(MarkerRecord record)
+        {
+            yield return apiClient.FetchIssues(
+                items =>
+                {
+                    for (int i = 0; i < items.Length; i++)
+                    {
+                        if (items[i] == null || items[i].id != record.Id) continue;
+
+                        record.Status = items[i].status;
+                        record.Title = items[i].title;
+                        record.Description = items[i].description;
+                        record.Priority = items[i].priority;
+
+                        if (infoRecord == record)
+                        {
+                            infoTitle.text = record.Title;
+                            infoMeta.text = "编号 " + record.Id
+                                + "     优先级 " + IssuePriorityLevel.ToLabel(record.Priority)
+                                + "     状态 " + IssuePriorityLevel.StatusLabel(record.Status);
+                            infoDescription.text = string.IsNullOrEmpty(record.Description) ? "（无描述）" : record.Description;
+                            infoHint.text = "已同步后端最新状态    ·    按 [ESC] 关闭";
+                        }
+
+                        return;
+                    }
+
+                    if (infoRecord == record) infoHint.text = "后端已无此问题    ·    按 [ESC] 关闭";
+                },
+                error =>
+                {
+                    if (infoRecord == record) infoHint.text = "核对失败：" + error + "    ·    按 [ESC] 关闭";
+                });
+        }
+
+        private void HideInfo()
+        {
+            infoRecord = null;
+            if (infoPanel != null) infoPanel.gameObject.SetActive(false);
+            IsFormOpen = false;
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+            if (player != null) player.SetControls(true);
+        }
+
+        // ------------------------------------------------------------ 界面构建
+
+        private void EnsureEventSystem()
+        {
+            if (EventSystem.current != null) return;
+            GameObject eventGo = new GameObject("上报事件系统", typeof(EventSystem), typeof(StandaloneInputModule));
+            eventGo.transform.SetParent(transform, false);
+        }
+
+        private RectTransform CreateCanvas(string name, int order)
+        {
+            GameObject canvasGo = new GameObject(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasGo.transform.SetParent(transform, false);
+
+            Canvas canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = order;
+
+            CanvasScaler scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+            scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+            scaler.matchWidthOrHeight = 0.5f;
+
+            return canvasGo.GetComponent<RectTransform>();
+        }
+
+        private void BuildForm()
+        {
+            EnsureEventSystem();
+
+            RectTransform canvas = CreateCanvas("上报界面", 120);
+            formPanel = UiFactory.Panel(canvas, "上报面板", PanelColor);
+            UiFactory.Place(formPanel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 10f), new Vector2(760f, 476f));
+            UiFactory.AddOutline(formPanel.GetComponent<Image>(), new Color(0.35f, 0.55f, 0.85f, 0.35f));
+
+            Text heading = UiFactory.Label(formPanel, "标题文字", "上报问题", 26, Color.white, TextAnchor.MiddleLeft);
+            UiFactory.Place(heading.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -18f), new Vector2(400f, 34f));
+
+            coordText = UiFactory.Label(formPanel, "坐标", "坐标：-", 16, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(coordText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -54f), new Vector2(700f, 22f));
+
+            Text titleLabel = UiFactory.Label(formPanel, "标题标签", "标题（必填）", 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(titleLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -88f), new Vector2(300f, 20f));
+            titleInput = CreateInput(formPanel, "标题输入", new Vector2(24f, -112f), new Vector2(712f, 42f), "例如：P-101A 泵体渗油", false);
+
+            Text descLabel = UiFactory.Label(formPanel, "描述标签", "描述（可选）", 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(descLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -164f), new Vector2(300f, 20f));
+            descriptionInput = CreateInput(formPanel, "描述输入", new Vector2(24f, -188f), new Vector2(712f, 82f), "补充现场情况", true);
+
+            Text priorityLabel = UiFactory.Label(formPanel, "优先级标签", "优先级", 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(priorityLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -284f), new Vector2(300f, 20f));
+
+            CreatePriorityButton("低", IssuePriorityLevel.Low, new Vector2(24f, -308f));
+            CreatePriorityButton("中", IssuePriorityLevel.Medium, new Vector2(264f, -308f));
+            CreatePriorityButton("高", IssuePriorityLevel.High, new Vector2(504f, -308f));
+
+            statusText = UiFactory.Label(formPanel, "状态", string.Empty, 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(statusText.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -356f), new Vector2(712f, 22f));
+
+            submitButton = CreateButton(formPanel, "提交", new Vector2(24f, -392f), new Vector2(348f, 46f));
+            submitButton.onClick.AddListener(OnSubmitClicked);
+
+            cancelButton = CreateButton(formPanel, "取消", new Vector2(388f, -392f), new Vector2(348f, 46f));
+            cancelButton.onClick.AddListener(Cancel);
+
+            SetPriority(IssuePriorityLevel.Medium);
+        }
+
+        private void BuildInfoPanel()
+        {
+            RectTransform canvas = CreateCanvas("问题详情界面", 121);
+
+            infoPanel = UiFactory.Panel(canvas, "问题详情", PanelColor);
+            UiFactory.Place(infoPanel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 10f), new Vector2(760f, 384f));
+            UiFactory.AddOutline(infoPanel.GetComponent<Image>(), new Color(0.85f, 0.45f, 0.35f, 0.35f));
+
+            RectTransform accent = UiFactory.Panel(infoPanel, "强调条", MarkerColor);
+            UiFactory.Place(accent, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(760f, 3f));
+
+            infoTitle = UiFactory.Label(infoPanel, "问题标题", "", 26, Color.white, TextAnchor.MiddleLeft);
+            UiFactory.Place(infoTitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -18f), new Vector2(712f, 36f));
+
+            infoMeta = UiFactory.Label(infoPanel, "问题元信息", "", 16, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(infoMeta.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -58f), new Vector2(712f, 22f));
+
+            Text descLabel = UiFactory.Label(infoPanel, "描述标签", "问题描述", 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(descLabel.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -96f), new Vector2(300f, 20f));
+
+            infoDescription = UiFactory.Label(infoPanel, "问题描述", "", 17, new Color(0.86f, 0.90f, 0.93f, 1f), TextAnchor.UpperLeft);
+            infoDescription.horizontalOverflow = HorizontalWrapMode.Wrap;
+            infoDescription.lineSpacing = 1.2f;
+            UiFactory.Place(infoDescription.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -122f), new Vector2(712f, 120f));
+
+            infoCoord = UiFactory.Label(infoPanel, "问题坐标", "", 16, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(infoCoord.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -256f), new Vector2(712f, 22f));
+
+            infoHint = UiFactory.Label(infoPanel, "问题提示", "", 15, AccentColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(infoHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -320f), new Vector2(712f, 22f));
+        }
+
+        private InputField CreateInput(RectTransform parent, string name, Vector2 position, Vector2 size, string placeholderText, bool multiline)
+        {
+            Image background = RaycastImage(parent, name, FieldColor);
+            RectTransform rect = background.rectTransform;
+            UiFactory.Place(rect, new Vector2(0f, 1f), new Vector2(0f, 1f), position, size);
+
+            InputField input = background.gameObject.AddComponent<InputField>();
+            input.lineType = multiline ? InputField.LineType.MultiLineNewline : InputField.LineType.SingleLine;
+            input.targetGraphic = background;
+
+            Text text = CreateFieldText(rect, Color.white, multiline ? TextAnchor.UpperLeft : TextAnchor.MiddleLeft);
+            input.textComponent = text;
+
+            Text placeholder = CreateFieldText(rect, new Color(0.55f, 0.58f, 0.62f, 1f), multiline ? TextAnchor.UpperLeft : TextAnchor.MiddleLeft);
+            placeholder.text = placeholderText;
+            input.placeholder = placeholder;
+
+            return input;
+        }
+
+        private static Text CreateFieldText(RectTransform parent, Color color, TextAnchor anchor)
+        {
+            GameObject go = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(Text));
+            go.transform.SetParent(parent, false);
+
+            RectTransform rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = new Vector2(12f, 8f);
+            rect.offsetMax = new Vector2(-12f, -8f);
+
+            Text text = go.GetComponent<Text>();
+            text.font = UiFactory.UiFont;
+            text.fontSize = 18;
+            text.color = color;
+            text.alignment = anchor;
+            text.supportRichText = false;
+            text.raycastTarget = false;
+            text.horizontalOverflow = HorizontalWrapMode.Wrap;
+            text.verticalOverflow = VerticalWrapMode.Truncate;
+            return text;
+        }
+
+        private void CreatePriorityButton(string label, string value, Vector2 position)
+        {
+            Button button = CreateButton(formPanel, label, position, new Vector2(232f, 38f));
+            button.onClick.AddListener(() => SetPriority(value));
+            priorityButtons[value] = button;
+        }
+
+        private Button CreateButton(RectTransform parent, string label, Vector2 position, Vector2 size)
+        {
+            Image background = RaycastImage(parent, "按钮_" + label, IdleColor);
+            UiFactory.Place(background.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), position, size);
+
+            Button button = background.gameObject.AddComponent<Button>();
+            button.targetGraphic = background;
+
+            Text text = UiFactory.Label(background.rectTransform, "文字", label, 18, Color.white, TextAnchor.MiddleCenter);
+            UiFactory.Stretch(text.rectTransform, 0f);
+            return button;
+        }
+
+        private static Image RaycastImage(RectTransform parent, string name, Color color)
+        {
+            GameObject go = new GameObject(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            go.transform.SetParent(parent, false);
+
+            Image image = go.GetComponent<Image>();
+            image.color = color;
+            image.raycastTarget = true;
+            return image;
+        }
+    }
+}
