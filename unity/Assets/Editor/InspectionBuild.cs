@@ -32,9 +32,22 @@ namespace Unity3DInspection.EditorTools
         {
             if (!File.Exists(ScenePath))
             {
-                SceneBuilder.BuildScene();
+                // 现场内容由 InspectionBootstrap 在运行时装配，场景文件只需存在且为空。
+                UnityEngine.SceneManagement.Scene scene =
+                    UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                        UnityEditor.SceneManagement.NewSceneSetup.EmptyScene,
+                        UnityEditor.SceneManagement.NewSceneMode.Single);
+
+                if (!UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, ScenePath))
+                {
+                    Debug.LogError("构建失败：无法创建场景 " + ScenePath);
+                    return false;
+                }
+
+                AssetDatabase.Refresh();
             }
 
+            EnsureStandardShaderIncluded();
             Directory.CreateDirectory(OutputDir);
             string target = Path.GetFullPath(Path.Combine(OutputDir, ExeName));
 
@@ -69,6 +82,33 @@ namespace Unity3DInspection.EditorTools
                 summary.totalSize / 1024 / 1024,
                 summary.totalTime));
             return true;
+        }
+
+        /// <summary>
+        /// 现场材质在运行期用 Shader.Find("Standard") 创建，需确保着色器被打进包体。
+        /// </summary>
+        public static void EnsureStandardShaderIncluded()
+        {
+            Shader standard = Shader.Find("Standard");
+            if (standard == null) return;
+
+            UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
+            if (assets == null || assets.Length == 0) return;
+
+            SerializedObject settings = new SerializedObject(assets[0]);
+            SerializedProperty shaders = settings.FindProperty("m_AlwaysIncludedShaders");
+            if (shaders == null) return;
+
+            for (int i = 0; i < shaders.arraySize; i++)
+            {
+                if (shaders.GetArrayElementAtIndex(i).objectReferenceValue == standard) return;
+            }
+
+            shaders.arraySize++;
+            shaders.GetArrayElementAtIndex(shaders.arraySize - 1).objectReferenceValue = standard;
+            settings.ApplyModifiedProperties();
+            AssetDatabase.SaveAssets();
+            Debug.Log("[巡检客户端] 已将 Standard 着色器加入 Always Included Shaders");
         }
     }
 }
