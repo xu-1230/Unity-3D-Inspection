@@ -17,4 +17,6 @@ type Store interface {
 	Create(issue model.Issue) (model.Issue, error)
 	// UpdateStatus 修改状态并刷新更新时间，标识不存在时返回 ErrNotFound。
 	UpdateStatus(id string, status model.Status) (model.Issue, error)
+	// Delete 移除指定问题，标识不存在时返回 ErrNotFound。
+	Delete(id string) error
 }

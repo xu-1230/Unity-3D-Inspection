@@ -10,7 +10,7 @@ import (
 	"unity-3d-inspection/backend/internal/store"
 )
 
-// 与需求规格说明书 5.7 节保持一致，另补两个传输层错误码。
+// 与需求规格说明书 5.8 节保持一致，另补两个传输层错误码。
 const (
 	codeInvalidJSON = "INVALID_JSON"
 	codeNotFound    = "ISSUE_NOT_FOUND"
@@ -75,6 +75,8 @@ func handleCreate(st store.Store) http.HandlerFunc {
 			Description: values.Description,
 			Priority:    values.Priority,
 			Status:      model.StatusOpen,
+			DeviceID:    values.DeviceID,
+			Area:        values.Area,
 			Location:    values.Location,
 		})
 		if err != nil {
@@ -138,5 +140,28 @@ func handleUpdateStatus(st store.Store) http.HandlerFunc {
 
 		log.Printf("%s %s -> 200 issue=%s status=%s", r.Method, r.URL.Path, updated.ID, updated.Status)
 		writeJSON(w, http.StatusOK, updated)
+	}
+}
+
+func handleDelete(st store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if id == "" {
+			writeError(w, http.StatusNotFound, codeNotFound, "指定标识的问题不存在", "")
+			return
+		}
+
+		if err := st.Delete(id); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, codeNotFound, "指定标识的问题不存在", "")
+				return
+			}
+			log.Printf("删除问题失败: %v", err)
+			writeError(w, http.StatusInternalServerError, codeInternal, "服务内部错误", "")
+			return
+		}
+
+		log.Printf("%s %s -> 204 issue=%s", r.Method, r.URL.Path, id)
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
