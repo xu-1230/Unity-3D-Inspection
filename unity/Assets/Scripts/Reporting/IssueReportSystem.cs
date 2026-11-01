@@ -26,6 +26,7 @@ namespace VirtualInspection.Reporting
         private static readonly Color AccentColor = new Color(0.26f, 0.52f, 0.96f, 1f);
         private static readonly Color IdleColor = new Color(0.18f, 0.21f, 0.26f, 1f);
         private static readonly Color ErrorColor = new Color(1f, 0.45f, 0.42f, 1f);
+        private static readonly Color SuccessColor = new Color(0.38f, 0.86f, 0.52f, 1f);
         private static readonly Color NeutralColor = new Color(0.82f, 0.84f, 0.86f, 1f);
         private static readonly Color MarkerColor = new Color(0.97f, 0.35f, 0.28f, 1f);
 
@@ -73,6 +74,14 @@ namespace VirtualInspection.Reporting
         private Button cancelButton;
         private readonly Dictionary<string, Button> priorityButtons = new Dictionary<string, Button>();
 
+        private RectTransform resultPanel;
+        private Image resultAccent;
+        private Text resultTitle;
+        private Text resultBody;
+        private Text resultHint;
+        private float resultTimer;
+        private bool resultAutoClose;
+
         private RectTransform infoPanel;
         private Image infoAccent;
         private Text infoTitle;
@@ -103,8 +112,10 @@ namespace VirtualInspection.Reporting
 
             BuildForm();
             BuildInfoPanel();
+            BuildResultPanel();
             HideForm();
             HideInfo();
+            HideResult();
         }
 
         private void Start()
@@ -244,6 +255,22 @@ namespace VirtualInspection.Reporting
         private void Update()
         {
             UpdateMarkerGlow();
+
+            if (resultPanel != null && resultPanel.gameObject.activeSelf)
+            {
+                if (resultAutoClose)
+                {
+                    resultTimer -= Time.unscaledDeltaTime;
+                    if (resultTimer <= 0f)
+                    {
+                        HideResult();
+                        return;
+                    }
+                }
+
+                if (Input.GetKeyDown(KeyCode.Escape)) HideResult();
+                return;
+            }
 
             if (infoPanel != null && infoPanel.gameObject.activeSelf)
             {
@@ -527,11 +554,22 @@ namespace VirtualInspection.Reporting
                 titleInput.text = string.Empty;
                 descriptionInput.text = string.Empty;
                 HideForm();
-                if (player != null) player.SetControls(true);
+
+                ShowResult(
+                    true,
+                    "上报成功",
+                    "编号 " + (string.IsNullOrEmpty(id) ? "未同步" : id)
+                        + "    优先级 " + IssuePriorityLevel.ToLabel(payload.priority)
+                        + "\n坐标 (" + pendingPosition.x.ToString("F2") + ", "
+                        + pendingPosition.y.ToString("F2") + ", "
+                        + pendingPosition.z.ToString("F2") + ")",
+                    2.5f);
             }
             else
             {
-                SetStatus("提交失败：" + (failure ?? "未知错误"), ErrorColor);
+                string reason = failure ?? "未知错误";
+                SetStatus("提交失败：" + reason, ErrorColor);
+                ShowResult(false, "上报失败", reason, 0f);
             }
         }
 
@@ -734,6 +772,66 @@ namespace VirtualInspection.Reporting
 
             infoHint = UiFactory.Label(infoPanel, "问题提示", "", 15, AccentColor, TextAnchor.MiddleLeft);
             UiFactory.Place(infoHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -320f), new Vector2(712f, 22f));
+        }
+
+        private void BuildResultPanel()
+        {
+            RectTransform canvas = CreateCanvas("结果提示界面", 122);
+
+            // 半透明遮罩同时挡住下层的表单，避免弹窗期间误点提交按钮。
+            Image blocker = RaycastImage(canvas, "结果遮罩", new Color(0f, 0f, 0f, 0.35f));
+            UiFactory.Stretch(blocker.rectTransform, 0f);
+
+            resultPanel = UiFactory.Panel(canvas, "结果提示", PanelColor);
+            UiFactory.Place(resultPanel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(560f, 208f));
+
+            resultAccent = UiFactory.Panel(resultPanel, "强调条", SuccessColor).GetComponent<Image>();
+            UiFactory.Place(resultAccent.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(560f, 4f));
+
+            resultTitle = UiFactory.Label(resultPanel, "结果标题", "", 26, Color.white, TextAnchor.MiddleLeft);
+            UiFactory.Place(resultTitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(26f, -22f), new Vector2(508f, 34f));
+
+            resultBody = UiFactory.Label(resultPanel, "结果内容", "", 17, new Color(0.86f, 0.90f, 0.93f, 1f), TextAnchor.UpperLeft);
+            resultBody.horizontalOverflow = HorizontalWrapMode.Wrap;
+            resultBody.lineSpacing = 1.2f;
+            UiFactory.Place(resultBody.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(26f, -70f), new Vector2(508f, 88f));
+
+            resultHint = UiFactory.Label(resultPanel, "结果提示", "", 15, NeutralColor, TextAnchor.MiddleLeft);
+            UiFactory.Place(resultHint.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(26f, -164f), new Vector2(508f, 22f));
+        }
+
+        /// <summary>展示提交结果；自动关闭秒数为 0 时只能按 Esc 关闭（失败场景，需要用户看清原因）。</summary>
+        private void ShowResult(bool success, string title, string body, float autoCloseSeconds)
+        {
+            if (resultPanel == null) return;
+
+            resultTitle.text = title;
+            resultBody.text = body;
+            resultAccent.color = success ? SuccessColor : ErrorColor;
+
+            resultAutoClose = autoCloseSeconds > 0f;
+            resultTimer = autoCloseSeconds;
+            resultHint.text = resultAutoClose
+                ? string.Format("{0:F1} 秒后自动关闭 · 按 [ESC] 立即关闭", autoCloseSeconds)
+                : "按 [ESC] 关闭提示，返回表单修改后重试";
+
+            IsFormOpen = true;
+            resultPanel.gameObject.SetActive(true);
+            if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
+        }
+
+        private void HideResult()
+        {
+            if (resultPanel != null) resultPanel.gameObject.SetActive(false);
+
+            bool formOpen = formPanel != null && formPanel.gameObject.activeSelf;
+            bool infoOpen = infoPanel != null && infoPanel.gameObject.activeSelf;
+
+            if (!formOpen && !infoOpen)
+            {
+                IsFormOpen = false;
+                if (player != null) player.SetControls(true);
+            }
         }
 
         private InputField CreateInput(RectTransform parent, string name, Vector2 position, Vector2 size, string placeholderText, bool multiline)
