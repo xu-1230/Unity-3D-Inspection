@@ -1,0 +1,59 @@
+# 一键运行 Web 两件套：浏览器只访问前端，前端把 /api 反代给后端。
+# Unity 客户端是宿主机上的 exe，直接访问暴露出来的后端端口，不参与本编排。
+#
+#   docker compose up -d --build     构建并启动
+#   docker compose logs -f           跟踪日志
+#   docker compose down              停止（数据卷保留）
+#
+# 端口等参数都带默认值，需要改动时在同目录建一个 .env（见 .env.example）。
+
+name: unity-3d-inspection
+
+services:
+  backend:
+    build:
+      context: ./backend
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY-docker.m.daocloud.io/library/}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+    image: unity-3d-inspection/backend:${TAG:-latest}
+    environment:
+      PORT: "8080"
+      DATA_PATH: /data/issues.db
+    volumes:
+      # 命名卷：数据与镜像生命周期解耦，down 不会丢数据，down -v 才会。
+      - inspection-data:/data
+    ports:
+      # 对宿主机暴露，因为 Unity 客户端直接用 http://localhost:8080 连接。
+      - "${BACKEND_PORT:-8080}:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY-docker.m.daocloud.io/library/}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+    image: unity-3d-inspection/frontend:${TAG:-latest}
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8088}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+volumes:
+  inspection-data:
+    name: unity-3d-inspection-data

@@ -1,0 +1,10 @@
+# 构建只需要源码与依赖清单；测试与本地数据不进构建上下文。
+**/*_test.go
+internal/store/storetest/
+data/
+*.db
+*.db-shm
+*.db-wal
+*.json
+Dockerfile
+.dockerignore

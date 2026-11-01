@@ -15,10 +15,12 @@ import (
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	st, err := store.NewFileStore(filepath.Join(t.TempDir(), "issues.json"))
+	st, err := store.NewSQLiteStore(filepath.Join(t.TempDir(), "issues.db"))
 	if err != nil {
 		t.Fatalf("创建存储失败：%v", err)
 	}
+	t.Cleanup(func() { st.Close() })
+
 	srv := httptest.NewServer(NewRouter(st))
 	t.Cleanup(srv.Close)
 	return srv

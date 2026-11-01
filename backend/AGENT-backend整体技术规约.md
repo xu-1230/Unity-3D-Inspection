@@ -14,7 +14,7 @@
 
 - Go，模块名 `unity-3d-inspection/backend`，`go.mod` 中声明的版本不低于 1.22（现有路由写法依赖 1.22+ 的方法路由）。
 - HTTP 使用标准库 `net/http`；引入第三方路由、ORM 或校验库需在提交说明中写明用途与替代方案。
-- 持久化只用 SQLite 驱动或 `encoding/json` 写本地文件，不引入外部数据库服务、缓存或消息队列。
+- 持久化只用 SQLite（驱动固定为纯 Go 的 `modernc.org/sqlite`，避免 cgo 与交叉编译问题），不引入外部数据库服务、缓存或消息队列。
 
 ## 4 目录与分层
 
@@ -23,7 +23,7 @@
 | `cmd/server/` | 读取配置、装配依赖、注册路由、启动服务 | `internal/api`、`internal/store` |
 | `internal/api/` | 路由处理器、请求解析、参数校验、错误响应 | `internal/model`、`internal/store` |
 | `internal/model/` | `Issue` 实体、优先级与状态常量、字段校验函数 | 仅标准库 |
-| `internal/store/` | 存储接口与实现（JSON 文件或 SQLite） | `internal/model` |
+| `internal/store/` | 存储接口与 SQLite 实现，`storetest/` 为与实现无关的一致性套件 | `internal/model` |
 
 依赖方向固定为 `cmd/api → model + store`、`store → model`；`model` 不依赖项目内其他包，`store` 不依赖 `api`。
 
@@ -72,11 +72,12 @@ type Store interface {
 
 **持久化**：
 
-- 启动时从固定路径加载数据，文件或表不存在时以空集合启动。
-- JSON 实现：全量写入临时文件后原子重命名替换，避免半写损坏。
-- SQLite 实现：写操作放在事务内。
-- 存储路径默认 `data/`（已在 `.gitignore` 中），可用环境变量覆盖；路径不随启动目录变化。
-- 对写操作加互斥（互斥量或单写入协程），并发创建时每个问题都获得唯一标识并全部保存。
+- 启动时打开固定路径的数据库，表不存在时按 `CREATE TABLE IF NOT EXISTS` 建好，以空集合启动。
+- 写操作放在事务内；连接池限制为单连接并把写操作串行化，避免 `SQLITE_BUSY` 抖动。
+- 时间字段以定宽 UTC 字符串存储（`model.TimeLayout`），这样 `ORDER BY created_at` 与字符串比较等价；列表排序为 `created_at DESC, id DESC, seq ASC`，与历史 JSON 实现一致。
+- `seq` 自增列只用于表达写入顺序：同一标识重复写入时，更新与删除只作用于最早一条（接口层用随机标识，正常路径不会重复）。
+- 存储路径默认 `data/issues.db`（已在 `.gitignore` 中），可用环境变量 `DATA_PATH` 覆盖；容器内为 `/data/issues.db`，由命名卷挂载。
+- 旧的 JSON 数据通过 `cmd/migrate` 显式导入，不参与服务启动流程。
 
 **跨域**：允许 `http://localhost` 与 `http://127.0.0.1` 的任意端口来源，允许方法 `GET`、`POST`、`PATCH`、`DELETE`、`OPTIONS`，允许请求头 `Content-Type`；`OPTIONS` 返回 204。不使用 Cookie，不开启凭据模式。
 
