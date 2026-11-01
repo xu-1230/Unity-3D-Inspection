@@ -24,7 +24,7 @@
 | 巡检客户端 | `unity/` | Unity LTS + C# |
 | 网页管理端 | `frontend/` | React + TypeScript + Vite |
 | 后端服务 | `backend/` | Go |
-| 持久化 | `backend/` | SQLite 或本地 JSON 文件，二选一 |
+| 持久化 | `backend/` | SQLite 单文件（选定方案，驱动 `modernc.org/sqlite`） |
 
 技术栈与存储选项来自 `项目介绍.txt`，属于固定项。
 

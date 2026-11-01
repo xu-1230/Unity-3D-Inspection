@@ -1,36 +1,44 @@
 ﻿# ------------------------------------------------------------------
 #  Unity-3D巡检 · 启动器
 #  用法：
-#    start-all.cmd              拉起后端与前端并打开浏览器
-#    start-backend.cmd          只启动 Go 后端
-#    start-frontend.cmd         只启动 React 开发服务器
+#    start-docker.cmd           构建（如有需要）并启动 Web 两件套，打开浏览器
+#    start-docker.cmd web       只启动 Web 两件套，不拉起 Unity 客户端
+#    start-docker.cmd build     强制重建镜像后启动
+#    start-docker.cmd down      停止容器（数据卷保留）
+#    start-docker.cmd logs      跟踪容器日志
+#    start-docker.cmd check     检查 Docker、端口、卷、场景与运行包
 #    start-unity.cmd            构建（如有需要）并运行独立包
+#    start-unity.cmd package    构建并打包成可分发的 release zip
 #    start-unity.cmd editor     打开 Unity 编辑器
 #    start-unity.cmd build      强制重新构建并运行
-#    start-all.cmd check        检查依赖、端口、场景与运行包
 # ------------------------------------------------------------------
 
 param(
-    [string]$Action = "all"
+    [string]$Action = "docker",
+    [string]$Sub = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent $PSScriptRoot
-$BackendDir = Join-Path $Root "backend"
-$FrontendDir = Join-Path $Root "frontend"
 $UnityDir = Join-Path $Root "unity"
-$DataFile = Join-Path $BackendDir "data\issues.json"
+$EnvFile = Join-Path $Root ".env"
+$ComposeFile = Join-Path $Root "compose.yaml"
 $ProjectVersionFile = Join-Path $UnityDir "ProjectSettings\ProjectVersion.txt"
 $ScenePath = Join-Path $UnityDir "Assets\Scenes\Main.unity"
 $BuildDir = Join-Path $UnityDir "Build"
 $ExePath = Join-Path $BuildDir "UnityInspection.exe"
+$ReleaseDir = Join-Path $Root "release"
+$ReleaseName = "UnityInspection-win64"
+$BackendConfigName = "backend-config.json"
+$HostDataFile = Join-Path $Root "backend\data\issues.db"
 $BuildLog = Join-Path $Root "Logs\build.log"
 $BuildMethod = "Unity3DInspection.EditorTools.InspectionBuild.BuildFromCommandLine"
 $ScriptPath = $PSCommandPath
 
+# 与 compose.yaml 中的默认端口保持一致，可用 .env 覆盖。
 $BackendPort = 8080
-$FrontendPort = 5173
+$FrontendPort = 8088
 
 function Write-Title {
     Write-Host ""
@@ -62,14 +70,26 @@ function Write-Hint([string]$Text) {
 function Show-Usage {
     Write-Host ""
     Write-Host "  用法：" -ForegroundColor White
-    Write-Host "    start-all.cmd             拉起后端与前端并打开浏览器"
-    Write-Host "    start-backend.cmd         只启动 Go 后端（8080）"
-    Write-Host "    start-frontend.cmd        只启动 React 开发服务器（5173）"
-    Write-Host "    start-unity.cmd           构建（如有需要）并运行独立包"
-    Write-Host "    start-unity.cmd editor    打开 Unity 编辑器"
-    Write-Host "    start-unity.cmd build     强制重新构建并运行"
-    Write-Host "    start-all.cmd check       检查依赖、端口、场景与运行包"
+    Write-Host "    start-docker.cmd           构建（如有需要）并启动 Web 两件套"
+    Write-Host "    start-docker.cmd web       只启动 Web 两件套，不拉起客户端"
+    Write-Host "    start-docker.cmd build     强制重建镜像后启动"
+    Write-Host "    start-docker.cmd down      停止容器（数据卷保留）"
+    Write-Host "    start-docker.cmd logs      跟踪容器日志"
+    Write-Host "    start-docker.cmd check     检查 Docker、端口、卷与运行包"
+    Write-Host "    start-unity.cmd            构建（如有需要）并运行独立包"
+    Write-Host "    start-unity.cmd package    构建并打包 release zip"
+    Write-Host "    start-unity.cmd editor     打开 Unity 编辑器"
+    Write-Host "    start-unity.cmd build      强制重新构建并运行"
     Write-Host ""
+}
+
+function Get-EnvSetting([string]$Key, [string]$Default) {
+    if (-not (Test-Path -LiteralPath $EnvFile)) { return $Default }
+    $match = Select-String -LiteralPath $EnvFile -Pattern ("^\s*{0}\s*=\s*(.*)$" -f [regex]::Escape($Key)) | Select-Object -First 1
+    if (-not $match -or $match.Matches.Count -eq 0) { return $Default }
+    $value = $match.Matches[0].Groups[1].Value.Trim()
+    if ($value -eq "") { return $Default }
+    return $value
 }
 
 function Get-ProjectVersion {
@@ -77,38 +97,6 @@ function Get-ProjectVersion {
     $match = Select-String -Path $ProjectVersionFile -Pattern "m_EditorVersion:\s*(\S+)" | Select-Object -First 1
     if ($match -and $match.Matches.Count -gt 0) {
         return $match.Matches[0].Groups[1].Value.Trim()
-    }
-    return $null
-}
-
-function Resolve-Go {
-    $candidates = New-Object System.Collections.ArrayList
-    if ($env:GO_HOME) { [void]$candidates.Add((Join-Path $env:GO_HOME "bin\go.exe")) }
-    if ($env:GOROOT) { [void]$candidates.Add((Join-Path $env:GOROOT "bin\go.exe")) }
-    [void]$candidates.Add("D:\ctf\go\bin\go.exe")
-    [void]$candidates.Add("C:\Program Files\Go\bin\go.exe")
-    [void]$candidates.Add("C:\Go\bin\go.exe")
-
-    $command = Get-Command go -ErrorAction SilentlyContinue
-    if ($command) { [void]$candidates.Add($command.Source) }
-
-    foreach ($path in $candidates) {
-        if ($path -and (Test-Path -LiteralPath $path)) { return $path }
-    }
-    return $null
-}
-
-function Resolve-Node {
-    $node = Get-Command node.exe -ErrorAction SilentlyContinue
-    if (-not $node) { $node = Get-Command node -ErrorAction SilentlyContinue }
-
-    # 优先 npm.cmd：npm.ps1 依赖 $MyInvocation.Statement 反解参数，
-    # 在脚本里用 & $var 调用时会错位成「Unknown command」。
-    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-    if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
-
-    if ($node -and $npm) {
-        return [pscustomobject]@{ Node = $node.Source; Npm = $npm.Source }
     }
     return $null
 }
@@ -225,9 +213,11 @@ function Test-WindowsBuildModule([string]$UnityExe) {
 }
 
 function Get-BuildStamp {
+    # 以 exe 的写入时间为准：构建戳只记录"脚本跑过一次构建"，
+    # 一旦构建失败或产物没被覆盖，用它会误判成"已是最新"。
+    if (Test-Path -LiteralPath $ExePath) { return (Get-Item -LiteralPath $ExePath).LastWriteTimeUtc }
     $stamp = Join-Path $BuildDir ".build-stamp"
     if (Test-Path -LiteralPath $stamp) { return (Get-Item -LiteralPath $stamp).LastWriteTimeUtc }
-    if (Test-Path -LiteralPath $ExePath) { return (Get-Item -LiteralPath $ExePath).LastWriteTimeUtc }
     return $null
 }
 
@@ -247,27 +237,30 @@ function Test-BuildStale {
     return $false
 }
 
-function Assert-Go {
-    $go = Resolve-Go
-    if (-not $go) {
-        Write-Err "未找到 Go 工具链，后端无法启动。"
-        Write-Hint "期望位置：D:\ctf\go\bin\go.exe"
-        Write-Hint "或设置环境变量 GO_HOME 指向 Go 安装目录后重试。"
-        Write-Hint "下载地址：https://go.dev/dl/"
+function Assert-Docker {
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if (-not $docker) {
+        Write-Err "未找到 Docker，Web 两件套无法启动。"
+        Write-Hint "安装 Docker Desktop：https://www.docker.com/products/docker-desktop/"
         exit 2
     }
-    return $go
-}
 
-function Assert-Node {
-    $node = Resolve-Node
-    if (-not $node) {
-        Write-Err "未找到 Node.js，前端无法启动。"
-        Write-Hint "需要 Node.js 20 或更高版本。"
-        Write-Hint "下载地址：https://nodejs.org/"
+    $composeVersion = (& docker compose version) 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "docker compose 子命令不可用。"
+        Write-Hint "需要 Docker Desktop 自带的 Compose v2。"
         exit 2
     }
-    return $node
+    Write-Ok ("Docker: {0}" -f ((& docker --version) 2>$null))
+    Write-Ok ("Compose: {0}" -f $composeVersion)
+
+    & docker info *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Docker 引擎未运行。"
+        Write-Hint "先启动 Docker Desktop，等状态变为 Running 后重试。"
+        exit 1
+    }
+    return $docker.Source
 }
 
 function Assert-Unity {
@@ -280,6 +273,119 @@ function Assert-Unity {
         exit 2
     }
     return $selection
+}
+
+function Invoke-Compose([string[]]$ComposeArgs) {
+    # docker 把进度写到 stderr，而 $ErrorActionPreference = "Stop" 会把原生命令的
+    # stderr 当成终止性错误，这里临时放宽并把两路输出都打印出来。
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    Push-Location $Root
+    try {
+        & docker compose @ComposeArgs | Out-Host
+        return $LASTEXITCODE
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $previous
+    }
+}
+
+function Test-WebReady {
+    return ((Test-HttpOk "http://localhost:$BackendPort/api/health") -and
+            (Test-HttpOk "http://localhost:$FrontendPort/"))
+}
+
+function Wait-WebReady([int]$Seconds = 60) {
+    Write-Step "等待服务就绪"
+    Write-Hint ("前端 http://localhost:{0}，后端 http://localhost:{1}/api/health" -f $FrontendPort, $BackendPort)
+    for ($i = 0; $i -lt $Seconds; $i++) {
+        if (Test-WebReady) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+function Start-UnityClient {
+    if (-not (Test-Path -LiteralPath $ExePath)) {
+        Write-Warn "尚未构建 Unity 运行包，跳过客户端启动。"
+        Write-Hint "需要客户端时执行：start-unity.cmd"
+        return
+    }
+    Write-Step "启动 Unity 客户端"
+    Start-Process -FilePath $ExePath -WorkingDirectory $BuildDir
+    Write-Ok "已启动，窗口标题为「Unity-3D巡检」"
+}
+
+function Invoke-DockerUp {
+    param([switch]$SkipClient)
+
+    $null = Assert-Docker
+
+    Write-Step "启动 Web 两件套"
+    if ((Invoke-Compose @("up", "-d")) -ne 0) {
+        Write-Err "容器启动失败。"
+        Write-Hint "查看详细日志：start-docker.cmd logs"
+        exit 1
+    }
+
+    if (-not (Wait-WebReady)) {
+        Write-Err "服务在 60 秒内未就绪。"
+        Write-Hint "查看详细日志：start-docker.cmd logs"
+        exit 1
+    }
+    Write-Ok ("前端：http://localhost:{0}" -f $FrontendPort)
+    Write-Ok ("后端：http://localhost:{0}/api/health" -f $BackendPort)
+
+    Write-Step "打开浏览器"
+    Start-Process ("http://localhost:{0}" -f $FrontendPort)
+
+    if (-not $SkipClient) { Start-UnityClient }
+}
+
+function Invoke-DockerBuild {
+    $null = Assert-Docker
+
+    Write-Step "重建镜像"
+    Write-Hint "首次构建需要下载基础镜像与依赖，请勿关闭窗口。"
+    if ((Invoke-Compose @("build")) -ne 0) {
+        Write-Err "镜像构建失败。"
+        Write-Hint "确认网络可访问基础镜像与依赖源后重试。"
+        exit 1
+    }
+    Write-Ok "镜像已更新。"
+
+    if ((Invoke-Compose @("up", "-d")) -ne 0) {
+        Write-Err "容器启动失败。"
+        exit 1
+    }
+
+    if (-not (Wait-WebReady)) {
+        Write-Err "服务在 60 秒内未就绪。"
+        Write-Hint "查看详细日志：start-docker.cmd logs"
+        exit 1
+    }
+    Write-Ok ("前端：http://localhost:{0}" -f $FrontendPort)
+    Write-Ok ("后端：http://localhost:{0}/api/health" -f $BackendPort)
+}
+
+function Invoke-DockerDown {
+    $null = Assert-Docker
+
+    Write-Step "停止容器"
+    if ((Invoke-Compose @("down")) -ne 0) {
+        Write-Err "停止失败。"
+        exit 1
+    }
+    Write-Ok "已停止，数据卷 unity-3d-inspection-data 保留。"
+    Write-Hint "需要连同数据一起清除时执行：docker compose down -v"
+}
+
+function Invoke-DockerLogs {
+    $null = Assert-Docker
+
+    Write-Step "跟踪容器日志"
+    Write-Hint "按 Ctrl+C 退出。"
+    $null = Invoke-Compose @("logs", "-f")
 }
 
 function Start-Exe {
@@ -366,142 +472,113 @@ function Invoke-UnityRun([bool]$Force) {
     Open-UnityEditor $selection $projectVersion
 }
 
-function Start-BackendWindow {
-    Write-Step "启动后端"
-    if (Test-PortBusy $BackendPort) {
-        if (Test-HttpOk "http://localhost:$BackendPort/api/health") {
-            Write-Ok ("后端已在运行，跳过启动：http://localhost:{0}" -f $BackendPort)
-        } else {
-            Write-Warn ("端口 {0} 被占用且健康检查失败，跳过后端启动。" -f $BackendPort)
-        }
-        return
+function Invoke-UnityPackage {
+    $projectVersion = Get-ProjectVersion
+    $selection = Assert-Unity
+
+    Write-Ok ("编辑器: {0}" -f $selection.Version)
+    if ($projectVersion -and -not $selection.Matched) {
+        Write-Warn ("工程版本 {0} 与编辑器 {1} 不一致，Unity 会提示升级，确认即可。" -f $projectVersion, $selection.Version)
     }
 
-    $go = Assert-Go
-    Write-Ok ("Go: {0}" -f $go)
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`" backend"
-    Write-Ok ("后端窗口已打开：http://localhost:{0}" -f $BackendPort)
-}
-
-function Start-FrontendWindow {
-    Write-Step "启动前端"
-    if (Test-PortBusy $FrontendPort) {
-        if (Test-HttpOk "http://localhost:$FrontendPort/") {
-            Write-Ok ("前端已在运行，跳过启动：http://localhost:{0}" -f $FrontendPort)
-        } else {
-            Write-Warn ("端口 {0} 被占用且页面无法访问，跳过前端启动。" -f $FrontendPort)
-        }
-        return
-    }
-
-    $node = Assert-Node
-    Write-Ok ("Node: {0}" -f $node.Node)
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/k", "powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$ScriptPath`" frontend"
-    Write-Ok ("前端窗口已打开：http://localhost:{0}" -f $FrontendPort)
-}
-
-function Invoke-Backend {
-    $go = Assert-Go
-    Write-Ok ("Go: {0}" -f $go)
-
-    $dataDir = Join-Path $BackendDir "data"
-    if (-not (Test-Path -LiteralPath $dataDir)) {
-        New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-    }
-    if (Test-PortBusy $BackendPort) {
-        if (Test-HttpOk "http://localhost:$BackendPort/api/health") {
-            Write-Ok ("后端已在运行：http://localhost:{0}/api/health" -f $BackendPort)
-            Write-Hint ("需要重启时先结束占用该端口的进程：Get-NetTCPConnection -LocalPort {0} -State Listen" -f $BackendPort)
-            exit 0
-        }
-        Write-Err ("端口 {0} 被占用，但健康检查失败。" -f $BackendPort)
-        Write-Hint "占用该端口的可能不是本项目的后端，先结束该进程再重试。"
-        Write-Hint ("查看占用：Get-NetTCPConnection -LocalPort {0} -State Listen | Select-Object OwningProcess" -f $BackendPort)
+    if (-not (Invoke-UnityBuild $selection)) {
+        Write-Err "构建失败，无法打包。"
         exit 1
     }
 
-    Write-Step "运行 go run ./cmd/server"
-    Write-Hint ("数据文件：{0}" -f $DataFile)
-    Write-Hint "按 Ctrl+C 停止服务。"
-    Push-Location $BackendDir
-    try {
-        & $go run ./cmd/server
-        $code = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-    if ($code -ne 0) {
-        Write-Err ("后端退出，退出码 {0}" -f $code)
-    }
-    exit $code
-}
+    Write-Step "汇总交付目录"
+    $target = Join-Path $ReleaseDir $ReleaseName
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    Copy-Item -Path (Join-Path $BuildDir "*") -Destination $target -Recurse -Force
+    Remove-Item -LiteralPath (Join-Path $target ".build-stamp") -Force -ErrorAction SilentlyContinue
 
-function Invoke-Frontend {
-    $node = Assert-Node
-    Write-Ok ("Node: {0}" -f $node.Node)
+    # exe 启动时读取同目录的 backend-config.json，缺省指向本机后端。
+    $configPath = Join-Path $target $BackendConfigName
+    $configText = "{`r`n  `"baseUrl`": `"http://localhost:$BackendPort`"`r`n}`r`n"
+    [System.IO.File]::WriteAllText($configPath, $configText, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Ok ("已写入 {0}（baseUrl = http://localhost:{1}）" -f $BackendConfigName, $BackendPort)
 
-    if (Test-PortBusy $FrontendPort) {
-        if (Test-HttpOk "http://localhost:$FrontendPort/") {
-            Write-Ok ("前端已在运行：http://localhost:{0}" -f $FrontendPort)
-            Write-Hint ("需要重启时先结束占用该端口的进程：Get-NetTCPConnection -LocalPort {0} -State Listen" -f $FrontendPort)
-            exit 0
-        }
-        Write-Err ("端口 {0} 被占用，但页面无法访问。" -f $FrontendPort)
-        Write-Hint "占用该端口的可能不是本项目的开发服务器，先结束该进程再重试。"
-        Write-Hint ("查看占用：Get-NetTCPConnection -LocalPort {0} -State Listen | Select-Object OwningProcess" -f $FrontendPort)
+    Write-Step "压缩为 zip"
+    $zip = Join-Path $ReleaseDir ("{0}.zip" -f $ReleaseName)
+    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    Compress-Archive -Path (Join-Path $target "*") -DestinationPath $zip -CompressionLevel Optimal
+    if (-not (Test-Path -LiteralPath $zip)) {
+        Write-Err "压缩失败。"
         exit 1
     }
 
-    $npmPath = $node.Npm
-
-    Push-Location $FrontendDir
-    try {
-        if (-not (Test-Path -LiteralPath (Join-Path $FrontendDir "node_modules"))) {
-            Write-Step "安装前端依赖"
-            & $npmPath install --no-audit --no-fund
-            if ($LASTEXITCODE -ne 0) {
-                Write-Err "npm install 失败。"
-                Write-Hint "检查网络或代理后，手动执行：cd frontend && npm install"
-                exit 1
-            }
-            Write-Ok "依赖安装完成。"
-        }
-
-        Write-Step "运行 npm run dev"
-        Write-Hint "/api 请求会转发到 http://localhost:8080"
-        Write-Hint "按 Ctrl+C 停止服务。"
-        & $npmPath run dev
-        $code = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-    if ($code -ne 0) {
-        Write-Err ("前端退出，退出码 {0}" -f $code)
-    }
-    exit $code
+    $sizeMb = [math]::Round((Get-Item -LiteralPath $zip).Length / 1MB, 1)
+    Write-Ok ("目录：{0}" -f $target)
+    Write-Ok ("压缩包：{0}（{1} MB）" -f $zip, $sizeMb)
+    Write-Hint "把 zip 解压到目标机器，按需修改 backend-config.json 里的后端地址。"
+    exit 0
 }
 
 function Show-Check {
     Write-Step "环境检查"
 
-    $go = Resolve-Go
-    if ($go) {
-        $goVersion = (& $go version) 2>$null
-        Write-Ok ("Go        : {0}" -f $goVersion)
-        Write-Hint ("路径      : {0}" -f $go)
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if ($docker) {
+        Write-Ok ("Docker    : {0}" -f ((& docker --version) 2>$null))
+        $composeVersion = (& docker compose version) 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok ("Compose   : {0}" -f $composeVersion)
+        } else {
+            Write-Err "Compose   : 不可用（需要 Compose v2）"
+        }
+
+        & docker info *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "引擎      : 运行中"
+        } else {
+            Write-Err "引擎      : 未运行（先启动 Docker Desktop）"
+        }
+
+        foreach ($image in @("unity-3d-inspection/backend", "unity-3d-inspection/frontend")) {
+            & docker image inspect ("{0}:latest" -f $image) *> $null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Ok ("镜像      : {0}:latest 已存在" -f $image)
+            } else {
+                Write-Warn ("镜像      : {0}:latest 尚未构建" -f $image)
+                Write-Hint "执行 start-docker.cmd build 构建。"
+            }
+        }
+
+        & docker volume inspect "unity-3d-inspection-data" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "数据卷    : unity-3d-inspection-data 已存在"
+        } else {
+            Write-Warn "数据卷    : 尚未创建，首次启动时自动创建"
+        }
     } else {
-        Write-Err "Go        : 未找到（后端无法启动）"
-        Write-Hint "期望位置：D:\ctf\go\bin\go.exe，或设置 GO_HOME"
+        Write-Err "Docker    : 未找到（Web 两件套无法启动）"
+        Write-Hint "安装 Docker Desktop：https://www.docker.com/products/docker-desktop/"
     }
 
-    $node = Resolve-Node
-    if ($node) {
-        $nodeVersion = (& $node.Node --version) 2>$null
-        Write-Ok ("Node      : {0}" -f $nodeVersion)
-        Write-Hint ("npm       : {0}（{1}）" -f (& $node.Npm --version), $node.Npm)
+    if (Test-PortBusy $BackendPort) {
+        if (Test-HttpOk "http://localhost:$BackendPort/api/health") {
+            Write-Ok ("端口 {0}   : 后端正在响应" -f $BackendPort)
+        } else {
+            Write-Warn ("端口 {0}   : 已被其它进程占用" -f $BackendPort)
+        }
     } else {
-        Write-Err "Node      : 未找到（前端无法启动）"
-        Write-Hint "需要 Node.js 20+：https://nodejs.org/"
+        Write-Ok ("端口 {0}   : 空闲" -f $BackendPort)
+    }
+
+    if (Test-PortBusy $FrontendPort) {
+        if (Test-HttpOk "http://localhost:$FrontendPort/") {
+            Write-Ok ("端口 {0}   : 前端正在响应" -f $FrontendPort)
+        } else {
+            Write-Warn ("端口 {0}   : 已被其它进程占用" -f $FrontendPort)
+        }
+    } else {
+        Write-Ok ("端口 {0}   : 空闲" -f $FrontendPort)
+    }
+
+    if (Test-Path -LiteralPath $HostDataFile) {
+        $sizeKb = [math]::Round((Get-Item -LiteralPath $HostDataFile).Length / 1KB, 1)
+        Write-Hint ("宿主机数据: backend\data\issues.db（{0} KB，仅本地 go run 使用）" -f $sizeKb)
     }
 
     $projectVersion = Get-ProjectVersion
@@ -524,16 +601,6 @@ function Show-Check {
         Write-Hint "可设置环境变量 UNITY_EXE 指向 Unity.exe"
     }
 
-    if (Test-PortBusy $BackendPort) { Write-Warn ("端口 {0}   : 已被占用" -f $BackendPort) } else { Write-Ok ("端口 {0}   : 空闲" -f $BackendPort) }
-    if (Test-PortBusy $FrontendPort) { Write-Warn ("端口 {0}   : 已被占用" -f $FrontendPort) } else { Write-Ok ("端口 {0}   : 空闲" -f $FrontendPort) }
-
-    if (Test-Path -LiteralPath $DataFile) {
-        $issues = Get-Content -LiteralPath $DataFile -Raw | ConvertFrom-Json
-        Write-Ok ("数据文件  : 已存在（{0} 条）" -f @($issues).Count)
-    } else {
-        Write-Warn "数据文件  : 尚未创建，首次上报后生成"
-    }
-
     if (Test-Path -LiteralPath $ScenePath) {
         Write-Ok "巡检场景  : 已生成"
     } else {
@@ -549,12 +616,27 @@ function Show-Check {
     } else {
         Write-Warn "运行包    : 尚未构建（执行 start-unity.cmd）"
     }
+
+    $zip = Join-Path $ReleaseDir ("{0}.zip" -f $ReleaseName)
+    if (Test-Path -LiteralPath $zip) {
+        Write-Ok ("交付包    : {0}" -f $zip)
+    } else {
+        Write-Warn "交付包    : 尚未生成（执行 start-unity.cmd package）"
+    }
+
+    if (-not (Test-Path -LiteralPath $ComposeFile)) {
+        Write-Err ("编排文件  : 缺失 {0}" -f $ComposeFile)
+    }
     Write-Host ""
 }
 
 # ---------------------------------------------------------------- 主流程
 
 $Action = $Action.ToLowerInvariant()
+$Sub = $Sub.ToLowerInvariant()
+
+$BackendPort = [int](Get-EnvSetting "BACKEND_PORT" "8080")
+$FrontendPort = [int](Get-EnvSetting "FRONTEND_PORT" "8088")
 
 Write-Title
 
@@ -564,13 +646,23 @@ if ($Action -eq "check") {
 }
 
 switch ($Action) {
-    "backend" {
-        Write-Host ("  目录: {0}" -f $BackendDir) -ForegroundColor Gray
-        Invoke-Backend
-    }
-    "frontend" {
-        Write-Host ("  目录: {0}" -f $FrontendDir) -ForegroundColor Gray
-        Invoke-Frontend
+    "docker" {
+        Write-Host ("  编排: {0}" -f $ComposeFile) -ForegroundColor Gray
+        switch ($Sub) {
+            ""      { Invoke-DockerUp }
+            "up"    { Invoke-DockerUp }
+            "web"   { Invoke-DockerUp -SkipClient }
+            "build" { Invoke-DockerBuild }
+            "down"  { Invoke-DockerDown }
+            "logs"  { Invoke-DockerLogs }
+            "check" { Show-Check }
+            default {
+                Write-Err ("未知子命令：{0}" -f $Sub)
+                Show-Usage
+                exit 1
+            }
+        }
+        exit 0
     }
     "run" {
         Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
@@ -584,28 +676,14 @@ switch ($Action) {
         Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
         Invoke-UnityRun $true
     }
+    "package" {
+        Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
+        Invoke-UnityPackage
+    }
     "editor" {
         Write-Host ("  工程: {0}" -f $UnityDir) -ForegroundColor Gray
         $selection = Assert-Unity
         Open-UnityEditor $selection (Get-ProjectVersion)
-    }
-    "all" {
-        $go = Assert-Go
-        $node = Assert-Node
-        Write-Ok ("Go        : {0}" -f $go)
-        Write-Ok ("Node      : {0}" -f $node.Node)
-
-        Start-BackendWindow
-        Start-Sleep -Seconds 3
-        Start-FrontendWindow
-        Start-Sleep -Seconds 4
-
-        Write-Step "打开浏览器"
-        Start-Process "http://localhost:$FrontendPort"
-        Write-Ok ("后端：http://localhost:{0}/api/health" -f $BackendPort)
-        Write-Ok ("前端：http://localhost:{0}" -f $FrontendPort)
-        Write-Hint "关闭两个命令行窗口即可停止服务。"
-        exit 0
     }
     default {
         Write-Err ("未知动作：{0}" -f $Action)

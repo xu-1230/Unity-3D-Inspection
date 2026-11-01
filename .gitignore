@@ -52,8 +52,13 @@ go.work.sum
 # ---- 后端本地数据（持久化文件不入库） ----
 backend/data/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
+
+# ---- Unity 交付产物 ----
+release/
 
 # ---- Node / React ----
 node_modules/
