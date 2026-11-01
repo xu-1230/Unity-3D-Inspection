@@ -1,0 +1,9 @@
+# 构建产物与本地依赖不进构建上下文，由镜像内重新安装/编译。
+node_modules/
+dist/
+dist-ssr/
+coverage/
+.env
+.env.*
+Dockerfile
+.dockerignore

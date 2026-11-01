@@ -16,6 +16,10 @@ export interface Issue {
   description: string;
   priority: IssuePriority;
   status: IssueStatus;
+  /** 设备编号，后端可选字段，缺省时为空串。 */
+  deviceId?: string;
+  /** 区域名称，后端可选字段，缺省时为空串。 */
+  area?: string;
   location: IssueLocation;
   createdAt: string;
   updatedAt: string;
@@ -26,6 +30,8 @@ export interface CreateIssueInput {
   title: string;
   description?: string;
   priority: IssuePriority;
+  deviceId?: string;
+  area?: string;
   location: IssueLocation;
 }
 
@@ -36,6 +42,12 @@ export const PRIORITY_LABELS: Record<IssuePriority, string> = {
   high: '高',
 };
 
+export const PRIORITY_HINTS: Record<IssuePriority, string> = {
+  low: '可排期处理',
+  medium: '需尽快安排',
+  high: '需立即响应',
+};
+
 export const STATUS_LABELS: Record<IssueStatus, string> = {
   open: '待处理',
   in_progress: '处理中',
@@ -43,3 +55,5 @@ export const STATUS_LABELS: Record<IssueStatus, string> = {
 };
 
 export const STATUS_OPTIONS: IssueStatus[] = ['open', 'in_progress', 'resolved'];
+
+export const PRIORITY_OPTIONS: IssuePriority[] = ['high', 'medium', 'low'];

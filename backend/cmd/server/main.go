@@ -21,13 +21,14 @@ func main() {
 	}
 	dataPath := os.Getenv("DATA_PATH")
 	if dataPath == "" {
-		dataPath = "data/issues.json"
+		dataPath = "data/issues.db"
 	}
 
-	st, err := store.NewFileStore(dataPath)
+	st, err := store.NewSQLiteStore(dataPath)
 	if err != nil {
-		log.Fatalf("加载存储失败（%s）: %v", dataPath, err)
+		log.Fatalf("打开存储失败（%s）: %v", dataPath, err)
 	}
+	defer st.Close()
 
 	srv := &http.Server{
 		Addr:              ":" + port,

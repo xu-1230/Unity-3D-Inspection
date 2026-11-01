@@ -24,7 +24,7 @@
 | 巡检客户端 | `unity/` | Unity LTS + C# |
 | 网页管理端 | `frontend/` | React + TypeScript + Vite |
 | 后端服务 | `backend/` | Go |
-| 持久化 | `backend/` | SQLite 或本地 JSON 文件，二选一 |
+| 持久化 | `backend/` | SQLite 单文件（选定方案，驱动 `modernc.org/sqlite`） |
 
 技术栈与存储选项来自 `项目介绍.txt`，属于固定项。
 
@@ -32,10 +32,10 @@
 
 下面是字段与枚举的名称清单，用于判断改动影响面；定义与示例见 `docs/需求规格说明书.md` 第 5、6 章。
 
-- 实体字段：`id`、`title`、`description`、`priority`、`status`、`location`（含 `x`、`y`、`z`）、`createdAt`、`updatedAt`
+- 实体字段：`id`、`title`、`description`、`priority`、`status`、`deviceId`（可选）、`area`（可选）、`location`（含 `x`、`y`、`z`）、`createdAt`、`updatedAt`
 - 优先级取值：`low`、`medium`、`high`
 - 状态取值：`open`、`in_progress`、`resolved`
-- 端点：`GET /api/health`、`POST /api/issues`、`GET /api/issues`、`PATCH /api/issues/{id}/status`
+- 端点：`GET /api/health`、`POST /api/issues`、`GET /api/issues`、`PATCH /api/issues/{id}/status`、`DELETE /api/issues/{id}`
 - 错误响应：`{"error":{"code","message","field"}}`
 
 字段或枚举的新增、改名、删除属于契约变更，在同一次改动内把后端 model、Unity 上报结构、管理端类型与规格说明书一起改完。

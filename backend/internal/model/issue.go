@@ -24,7 +24,7 @@ const (
 	StatusResolved   Status = "resolved"
 )
 
-// 错误码，与需求规格说明书第 5.7 节一一对应。
+// 错误码，与需求规格说明书第 5.8 节一一对应。
 const (
 	CodeInvalidTitle    = "INVALID_TITLE"
 	CodeInvalidPriority = "INVALID_PRIORITY"
@@ -57,13 +57,19 @@ func (l Location) Valid() bool {
 	return true
 }
 
+// 可选文本字段的长度上限，按字符数（rune）计，避免异常长的字段撑破管理端布局。
+const maxLabelRunes = 64
+
 // Issue 是保存后的问题实体。
+// DeviceID 与 Area 为可选描述字段，缺省时为空串，客户端与后端均不得据此拒绝上报。
 type Issue struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	Priority    Priority `json:"priority"`
 	Status      Status   `json:"status"`
+	DeviceID    string   `json:"deviceId"`
+	Area        string   `json:"area"`
 	Location    Location `json:"location"`
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   string   `json:"updatedAt"`
@@ -83,6 +89,8 @@ type CreateRequest struct {
 	Title       *string   `json:"title"`
 	Description *string   `json:"description"`
 	Priority    *string   `json:"priority"`
+	DeviceID    *string   `json:"deviceId"`
+	Area        *string   `json:"area"`
 	Location    *Location `json:"location"`
 }
 
@@ -91,7 +99,25 @@ type CreateValues struct {
 	Title       string
 	Description string
 	Priority    Priority
+	DeviceID    string
+	Area        string
 	Location    Location
+}
+
+// optionalLabel 去掉首尾空白并截断超长内容；缺省与空白都归一为空串。
+func optionalLabel(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return ""
+	}
+	runes := []rune(trimmed)
+	if len(runes) > maxLabelRunes {
+		return string(runes[:maxLabelRunes])
+	}
+	return trimmed
 }
 
 // Validate 按「标题 → 优先级 → 坐标」的顺序校验，返回首个命中的错误。
@@ -129,6 +155,9 @@ func (r CreateRequest) Validate() (CreateValues, *Error) {
 	if r.Description != nil {
 		out.Description = *r.Description
 	}
+
+	out.DeviceID = optionalLabel(r.DeviceID)
+	out.Area = optionalLabel(r.Area)
 	return out, nil
 }
 
