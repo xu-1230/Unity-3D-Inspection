@@ -74,6 +74,7 @@ namespace VirtualInspection.Reporting
         private Button cancelButton;
         private readonly Dictionary<string, Button> priorityButtons = new Dictionary<string, Button>();
 
+        private RectTransform resultCanvas;
         private RectTransform resultPanel;
         private Image resultAccent;
         private Text resultTitle;
@@ -256,7 +257,7 @@ namespace VirtualInspection.Reporting
         {
             UpdateMarkerGlow();
 
-            if (resultPanel != null && resultPanel.gameObject.activeSelf)
+            if (resultCanvas != null && resultCanvas.gameObject.activeSelf)
             {
                 if (resultAutoClose)
                 {
@@ -776,13 +777,14 @@ namespace VirtualInspection.Reporting
 
         private void BuildResultPanel()
         {
-            RectTransform canvas = CreateCanvas("结果提示界面", 122);
+            resultCanvas = CreateCanvas("结果提示界面", 122);
 
             // 半透明遮罩同时挡住下层的表单，避免弹窗期间误点提交按钮。
-            Image blocker = RaycastImage(canvas, "结果遮罩", new Color(0f, 0f, 0f, 0.35f));
+            // 遮罩与面板同属一块画布，显隐必须整体切换，否则残留的遮罩会吃掉所有点击。
+            Image blocker = RaycastImage(resultCanvas, "结果遮罩", new Color(0f, 0f, 0f, 0.35f));
             UiFactory.Stretch(blocker.rectTransform, 0f);
 
-            resultPanel = UiFactory.Panel(canvas, "结果提示", PanelColor);
+            resultPanel = UiFactory.Panel(resultCanvas, "结果提示", PanelColor);
             UiFactory.Place(resultPanel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(560f, 208f));
 
             resultAccent = UiFactory.Panel(resultPanel, "强调条", SuccessColor).GetComponent<Image>();
@@ -816,6 +818,7 @@ namespace VirtualInspection.Reporting
                 : "按 [ESC] 关闭提示，返回表单修改后重试";
 
             IsFormOpen = true;
+            resultCanvas.gameObject.SetActive(true);
             resultPanel.gameObject.SetActive(true);
             if (EventSystem.current != null) EventSystem.current.SetSelectedGameObject(null);
         }
@@ -823,6 +826,7 @@ namespace VirtualInspection.Reporting
         private void HideResult()
         {
             if (resultPanel != null) resultPanel.gameObject.SetActive(false);
+            if (resultCanvas != null) resultCanvas.gameObject.SetActive(false);
 
             bool formOpen = formPanel != null && formPanel.gameObject.activeSelf;
             bool infoOpen = infoPanel != null && infoPanel.gameObject.activeSelf;
