@@ -12,9 +12,9 @@
 
 [![播放演示视频](https://img.shields.io/badge/%E6%92%AD%E6%94%BE%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91-49.9_MB-2f6feb?style=for-the-badge)](https://xu-1230.github.io/Unity-3D-Inspection/demo/)
 
-- 在线观看：<https://xu-1230.github.io/Unity-3D-Inspection/demo/>，由 GitHub Pages 承载的播放页，浏览器内直接播放，支持拖动进度与全屏（页面源码 `demo/index.html`）。
-- 文件位置 `video/演示视频.mp4`（MP4 / H.264，约 49.9 MB），也可以从仓库文件页打开，或克隆后用任意播放器离线观看。
-- 为什么 README 里没有直接播放器：GitHub 会过滤 `<video>` 与 `<iframe>`，仓库内的 mp4 无法内嵌进 Markdown，所以改用 Pages 页面承载播放器，保证点开就能看。若一定要让视频出现在 README 正文中，只能在 issue 或评论里拖拽上传，拿到 `https://github.com/user-attachments/assets/...` 地址后替换上方链接。
+- 在线观看：<https://xu-1230.github.io/Unity-3D-Inspection/demo/>，GitHub Pages 承载的播放页，浏览器内直接播放，支持拖动进度与全屏（页面源码 `demo/index.html`）。
+- 视频文件：`video/演示视频.mp4`（MP4 / H.264，约 49.9 MB），也可在[仓库文件页](https://github.com/xu-1230/Unity-3D-Inspection/blob/main/video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)打开，或克隆后本地播放。
+- 为什么 README 里没有直接播放器：GitHub 会过滤 `<video>` 与 `<iframe>`，仓库内的 mp4 无法内嵌进 Markdown，所以用 Pages 页面承载播放器，保证点开就能看。若一定要让视频出现在 README 正文中，只能在 issue 或评论里拖拽上传，拿到 `https://github.com/user-attachments/assets/...` 地址后替换上方链接。
 
 ## 1 使用的版本
 
