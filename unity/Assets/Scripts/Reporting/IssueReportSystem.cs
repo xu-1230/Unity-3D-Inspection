@@ -15,6 +15,12 @@ namespace VirtualInspection.Reporting
     {
         private const float MaxPickDistance = 45f;
 
+        /// <summary>后台轮询间隔，与管理端轮询节奏保持一致。</summary>
+        private const float PollIntervalSeconds = 5f;
+
+        /// <summary>连续失败若干次后把间隔拉长，成功一次即恢复。</summary>
+        private const int PollFailThreshold = 3;
+
         private static readonly Color PanelColor = new Color(0.031f, 0.043f, 0.059f, 0.96f);
         private static readonly Color FieldColor = new Color(0.09f, 0.11f, 0.14f, 0.98f);
         private static readonly Color AccentColor = new Color(0.26f, 0.52f, 0.96f, 1f);
@@ -104,6 +110,7 @@ namespace VirtualInspection.Reporting
         private void Start()
         {
             StartCoroutine(LoadExistingIssues());
+            StartCoroutine(PollIssues());
         }
 
         private IEnumerator LoadExistingIssues()
@@ -111,17 +118,127 @@ namespace VirtualInspection.Reporting
             yield return apiClient.FetchIssues(
                 items =>
                 {
-                    for (int i = 0; i < items.Length; i++)
-                    {
-                        IssueItem item = items[i];
-                        if (item == null || item.location == null) continue;
-                        CreateMarkerRecord(item.id, item.title, item.description, item.priority, item.status,
-                            item.createdAt, new Vector3(item.location.x, item.location.y, item.location.z));
-                    }
-
+                    Reconcile(items);
                     Debug.Log("[上报] 已从后端还原问题标记 " + markers.Count + " 个");
                 },
                 error => Debug.LogWarning("[上报] 拉取历史问题失败：" + error));
+        }
+
+        /// <summary>后台轮询：弹窗打开或窗口失焦时跳过，避免打断输入与无谓请求。</summary>
+        private IEnumerator PollIssues()
+        {
+            float interval = PollIntervalSeconds;
+            int failStreak = 0;
+
+            while (true)
+            {
+                yield return new WaitForSecondsRealtime(interval);
+
+                if (IsFormOpen) continue;
+                if (!Application.isFocused) continue;
+
+                IssueItem[] items = null;
+                yield return apiClient.FetchIssues(
+                    result => items = result,
+                    error => Debug.LogWarning("[上报] 自动刷新失败：" + error));
+
+                if (items != null)
+                {
+                    failStreak = 0;
+                    interval = PollIntervalSeconds;
+                    Reconcile(items);
+                }
+                else
+                {
+                    failStreak++;
+                    if (failStreak >= PollFailThreshold) interval = PollIntervalSeconds * 3f;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 把场景标记与后端列表对齐：新增的问题补标记，消失的标记销毁，
+        /// 变化的就地更新状态与优先级。正在 hover 或被详情面板引用的标记会先清理引用。
+        /// </summary>
+        private void Reconcile(IssueItem[] items)
+        {
+            if (items == null) return;
+
+            HashSet<string> alive = new HashSet<string>();
+            int added = 0;
+            int updated = 0;
+
+            for (int i = 0; i < items.Length; i++)
+            {
+                IssueItem item = items[i];
+                if (item == null || item.location == null || string.IsNullOrEmpty(item.id)) continue;
+
+                alive.Add(item.id);
+                MarkerRecord record = FindById(item.id);
+
+                if (record == null)
+                {
+                    CreateMarkerRecord(item.id, item.title, item.description, item.priority, item.status,
+                        item.createdAt, new Vector3(item.location.x, item.location.y, item.location.z));
+                    added++;
+                    continue;
+                }
+
+                bool changed = record.Status != item.status
+                    || record.Priority != item.priority
+                    || record.Title != item.title
+                    || record.Description != item.description;
+
+                record.Title = item.title;
+                record.Description = item.description;
+                record.Priority = item.priority;
+                record.Status = item.status;
+
+                if (changed)
+                {
+                    ApplyStatusVisual(record);
+                    updated++;
+                }
+            }
+
+            int removed = 0;
+            for (int i = markers.Count - 1; i >= 0; i--)
+            {
+                MarkerRecord record = markers[i];
+                if (string.IsNullOrEmpty(record.Id)) continue;
+                if (alive.Contains(record.Id)) continue;
+
+                RemoveMarker(record);
+                removed++;
+            }
+
+            if (added + updated + removed > 0)
+            {
+                Debug.Log("[上报] 标记同步：新增 " + added + "，变更 " + updated + "，移除 " + removed);
+            }
+        }
+
+        private MarkerRecord FindById(string id)
+        {
+            for (int i = 0; i < markers.Count; i++)
+            {
+                if (markers[i].Id == id) return markers[i];
+            }
+
+            return null;
+        }
+
+        private void RemoveMarker(MarkerRecord record)
+        {
+            if (record == null) return;
+
+            if (hovered == record) hovered = null;
+            if (infoRecord == record) HideInfo();
+
+            if (record.Marker != null) markerIndex.Remove(record.Marker);
+            markers.Remove(record);
+
+            if (record.Marker != null) Destroy(record.Marker);
         }
 
         private void Update()

@@ -613,6 +613,12 @@
   backdrop-filter: blur(14px);
 }
 
+/* 后台同步提示：不用危险色，避免和失败提示混淆 */
+.toast--info {
+  border-left-color: var(--accent);
+  color: var(--text-dim);
+}
+
 @keyframes toast-in {
   from {
     opacity: 0;
