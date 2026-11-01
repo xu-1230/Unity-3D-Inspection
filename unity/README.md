@@ -45,8 +45,18 @@ Unity 端承担两件事：**现场巡检**与**问题上报**。
 描述、优先级（低/中/高）、命中点世界坐标。提交成功要求后端返回 **201**，失败时表单保留并显示后端
 `error.message`，可修正后重试；`Esc` 等同于取消，会立即销毁待提交标记。
 
-启动时会 `GET /api/issues` 把已有问题还原成场景中的红色标记；准星指向标记会发光，左键点击打开问题详情
+上报时自动附带两个描述字段：`deviceId` 取被点击对象的名称，`area` 按命中点落入的固定区域判定
+（泵区 / 储罐区 / 输送区 / 配电区 / 控制区，见 `Scripts/Core/InspectionRegions.cs`），框外留空，
+管理端据此展示区域分布。
+
+启动时会 `GET /api/issues` 把已有问题还原成场景中的标记；准星指向标记会发光，左键点击打开问题详情
 （标题、编号、优先级、描述、坐标），并即时请求后端核对最新状态（待处理 / 处理中 / 已解决）。
+
+标记按优先级区分：**高＝红（最大）**、**中＝橙（中等）**、**低＝蓝（最小）**；提交前调整优先级时，
+待提交标记会实时变色变大小，提交后沿用同一形态。
+
+状态叠加在同一套标记上：**待处理＝实心球**、**处理中＝球外套一圈缓慢旋转的发光环**、
+**已解决＝球体整体变暗并缩小到 70%**。打开详情时会重新拉取后端状态，标记外形随之切换。
 
 ## 后端约定
 
@@ -57,11 +67,13 @@ Unity 端承担两件事：**现场巡检**与**问题上报**。
   "title": "P-101A 泵体渗油",
   "description": "机封处有油迹",
   "priority": "high",
-  "location": { "x": 1.5, "y": 2.0, "z": -3.25 }
+  "deviceId": "泵体",
+  "area": "泵区",
+  "location": { "x": -15.4, "y": 0.7, "z": 5.2 }
 }
 ```
 
-`priority` 取 `low` / `medium` / `high`；`id`、`status`、`createdAt` 由服务端生成。
+`priority` 取 `low` / `medium` / `high`；`deviceId`、`area` 为可选描述字段；`id`、`status`、`createdAt` 由服务端生成。
 坐标按 Unity 世界坐标原样上报，不做任何换算，由展示层自行解释。
 
 ## 目录结构
@@ -74,7 +86,7 @@ Assets/
   Scenes/
     Main.unity              # 空场景，现场运行时装配
   Scripts/
-    Core/        InspectionBootstrap / InspectionSiteRoot / SiteLayout
+    Core/        InspectionBootstrap / InspectionSiteRoot / SiteLayout / InspectionRegions
     World/       Shape / MaterialLibrary / ProceduralTextures / SiteGeometry
     Player/      FirstPersonPlayer
     Inspection/  InspectionDefinition / InspectionPoint / InspectionSystem
