@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unity-3D巡检 · 演示视频</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --panel: #161b22;
+    --line: #30363d;
+    --text: #e6edf3;
+    --muted: #9198a1;
+    --accent: #2f6feb;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2431 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", system-ui, -apple-system, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px 64px;
+  }
+
+  main { width: 100%; max-width: 1100px; }
+
+  header { margin-bottom: 22px; }
+
+  h1 {
+    margin: 0 0 8px;
+    font-size: clamp(20px, 2.6vw, 30px);
+    font-weight: 600;
+    letter-spacing: .5px;
+  }
+
+  header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .player {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .45);
+  }
+
+  video {
+    display: block;
+    width: 100%;
+    max-height: 72vh;
+    border-radius: 8px;
+    background: #000;
+    outline: none;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    align-items: center;
+    margin: 16px 2px 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .back { margin-top: 26px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Unity-3D巡检 · 演示视频</h1>
+    <p>巡检客户端射线标记并上报 → Go 后端持久化 → React 管理端查看与处置，三端共用同一份数据。</p>
+  </header>
+
+  <div class="player">
+    <video controls playsinline preload="metadata"
+           src="../video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4">
+      你的浏览器不支持 video 标签，请<a href="../video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4">直接下载视频</a>。
+    </video>
+  </div>
+
+  <p class="meta">
+    <span>约 49.9 MB · MP4 / H.264</span>
+    <a href="../video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4" download>下载原文件</a>
+  </p>
+
+  <p class="back"><a href="https://github.com/xu-1230/Unity-3D-Inspection">← 返回仓库首页</a></p>
+</main>
+</body>
+</html>

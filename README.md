@@ -10,11 +10,11 @@
 
 ## 演示视频
 
-[![播放演示视频](https://img.shields.io/badge/%E6%92%AD%E6%94%BE%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91-49.9_MB-2f6feb?style=for-the-badge)](video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)
+[![播放演示视频](https://img.shields.io/badge/%E6%92%AD%E6%94%BE%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91-49.9_MB-2f6feb?style=for-the-badge)](https://xu-1230.github.io/Unity-3D-Inspection/demo/)
 
-- 文件位置 `video/演示视频.mp4`（MP4 / H.264，约 49.9 MB）。点击上方按钮或[这个链接](video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)进入 GitHub 文件页，用内置播放器在线观看，支持拖动进度与全屏。
-- 离线观看：克隆仓库后，用任意播放器打开该文件。
-- 为什么不是页面内直接播放：GitHub 的 Markdown 会过滤 `<video>` 标签，仓库内的 mp4 无法内嵌播放，所以这里用「按钮 + 文件页播放器」的方式保证在 GitHub 上一定能播。若希望视频出现在 README 正文里，把文件拖进任意 issue 或评论上传，拿到 `https://github.com/user-attachments/assets/...` 地址后替换上方链接即可。
+- 在线观看：<https://xu-1230.github.io/Unity-3D-Inspection/demo/>，由 GitHub Pages 承载的播放页，浏览器内直接播放，支持拖动进度与全屏（页面源码 `demo/index.html`）。
+- 文件位置 `video/演示视频.mp4`（MP4 / H.264，约 49.9 MB），也可以从仓库文件页打开，或克隆后用任意播放器离线观看。
+- 为什么 README 里没有直接播放器：GitHub 会过滤 `<video>` 与 `<iframe>`，仓库内的 mp4 无法内嵌进 Markdown，所以改用 Pages 页面承载播放器，保证点开就能看。若一定要让视频出现在 README 正文中，只能在 issue 或评论里拖拽上传，拿到 `https://github.com/user-attachments/assets/...` 地址后替换上方链接。
 
 ## 1 使用的版本
 
@@ -128,4 +128,4 @@ AR 的世界原点是设备启动时由跟踪系统自建的，每次启动、�
 - [部署与打包说明](docs/部署与打包说明.md)：Compose 编排、数据卷、迁移与 exe 打包
 - [AGENT-整体技术规约.md](AGENT-整体技术规约.md)：全局技术约束与三端规约索引
 - 各端说明：[unity](unity/README.md) / [frontend](frontend/README.md) / [backend](backend/README.md)
-- 演示视频：[video/演示视频.mp4](video/%E6%BC%94%E7%A4%BA%E8%A7%86%E9%A2%91.mp4)
+- 演示视频：[在线播放页](https://xu-1230.github.io/Unity-3D-Inspection/demo/)（源码 `demo/index.html`，视频文件 `video/演示视频.mp4`）
