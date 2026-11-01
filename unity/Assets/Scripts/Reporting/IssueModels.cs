@@ -18,6 +18,13 @@ namespace VirtualInspection.Reporting
         public string title;
         public string description;
         public string priority;
+
+        /// <summary>设备编号或名称，取点击到的场景对象名；后端按可选字段处理。</summary>
+        public string deviceId;
+
+        /// <summary>区域名称，留空表示未标注。</summary>
+        public string area;
+
         public IssueLocationDto location;
     }
 
@@ -40,6 +47,8 @@ namespace VirtualInspection.Reporting
         public string description;
         public string priority;
         public string status;
+        public string deviceId;
+        public string area;
         public IssueLocationDto location;
         public string createdAt;
         public string updatedAt;

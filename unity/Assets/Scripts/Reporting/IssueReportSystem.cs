@@ -14,7 +14,6 @@ namespace VirtualInspection.Reporting
     public class IssueReportSystem : MonoBehaviour
     {
         private const float MaxPickDistance = 45f;
-        private const float MarkerDiameter = 0.3f;
 
         private static readonly Color PanelColor = new Color(0.031f, 0.043f, 0.059f, 0.96f);
         private static readonly Color FieldColor = new Color(0.09f, 0.11f, 0.14f, 0.98f);
@@ -23,7 +22,21 @@ namespace VirtualInspection.Reporting
         private static readonly Color ErrorColor = new Color(1f, 0.45f, 0.42f, 1f);
         private static readonly Color NeutralColor = new Color(0.82f, 0.84f, 0.86f, 1f);
         private static readonly Color MarkerColor = new Color(0.97f, 0.35f, 0.28f, 1f);
-        private static readonly Color MarkerGlow = new Color(0.55f, 0.85f, 1f, 1f);
+
+        /// <summary>颜色只表示状态：待处理=红、处理中=橙、已解决=绿。</summary>
+        private static Color StatusColor(string status)
+        {
+            if (status == "resolved") return new Color(0.36f, 0.80f, 0.44f, 1f);
+            if (status == "in_progress") return new Color(0.98f, 0.68f, 0.18f, 1f);
+            return new Color(0.93f, 0.29f, 0.24f, 1f);
+        }
+
+        private static float PriorityScale(string issuePriority)
+        {
+            if (issuePriority == IssuePriorityLevel.High) return 0.38f;
+            if (issuePriority == IssuePriorityLevel.Low) return 0.24f;
+            return 0.31f;
+        }
 
         /// <summary>任一弹窗（上报表单 / 问题详情）打开时置为 true，供巡检系统让出输入。</summary>
         public static bool IsFormOpen { get; private set; }
@@ -55,6 +68,7 @@ namespace VirtualInspection.Reporting
         private readonly Dictionary<string, Button> priorityButtons = new Dictionary<string, Button>();
 
         private RectTransform infoPanel;
+        private Image infoAccent;
         private Text infoTitle;
         private Text infoMeta;
         private Text infoDescription;
@@ -66,9 +80,11 @@ namespace VirtualInspection.Reporting
         private MarkerRecord hovered;
         private MarkerRecord infoRecord;
         private GameObject pendingMarker;
+        private Material pendingMaterial;
 
         private string priority = IssuePriorityLevel.Medium;
         private Vector3 pendingPosition;
+        private string pendingDeviceId = string.Empty;
         private bool submitting;
 
         public void Setup(FirstPersonPlayer firstPersonPlayer)
@@ -149,7 +165,10 @@ namespace VirtualInspection.Reporting
             else if (hasHit)
             {
                 if (player != null && hit.collider != null && hit.collider.transform.IsChildOf(player.transform)) return;
-                OpenForm(hit.point);
+
+                // 以命中对象名作为设备编号，便于管理端按设备聚合；后端按可选字段存储。
+                string deviceId = hit.collider != null ? hit.collider.gameObject.name : string.Empty;
+                OpenForm(hit.point, deviceId);
             }
         }
 
@@ -179,7 +198,7 @@ namespace VirtualInspection.Reporting
             marker.name = "问题标记 " + (string.IsNullOrEmpty(id) ? title : id);
             marker.transform.SetParent(transform, false);
             marker.transform.position = position;
-            marker.transform.localScale = Vector3.one * MarkerDiameter;
+            marker.transform.localScale = Vector3.one * PriorityScale(issuePriority);
 
             Renderer renderer = marker.GetComponent<Renderer>();
             Material material = null;
@@ -188,7 +207,7 @@ namespace VirtualInspection.Reporting
                 Shader shader = Shader.Find("Standard");
                 if (shader == null) shader = Shader.Find("Sprites/Default");
                 material = new Material(shader);
-                material.color = MarkerColor;
+                material.color = StatusColor(status);
                 material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None;
                 renderer.material = material;
             }
@@ -208,7 +227,23 @@ namespace VirtualInspection.Reporting
 
             markers.Add(record);
             markerIndex[marker] = record;
+            ApplyStatusVisual(record);
             return record;
+        }
+
+        /// <summary>
+        /// 状态只改颜色（待处理红 / 处理中橙 / 已解决绿），优先级只改尺寸，两个维度互不抢占。
+        /// </summary>
+        private void ApplyStatusVisual(MarkerRecord record)
+        {
+            if (record == null || record.Marker == null) return;
+
+            record.Marker.transform.localScale = Vector3.one * PriorityScale(record.Priority);
+
+            if (record.Material != null)
+            {
+                record.Material.color = StatusColor(record.Status);
+            }
         }
 
         private void SetHovered(MarkerRecord record)
@@ -227,16 +262,18 @@ namespace VirtualInspection.Reporting
                 if (record.Material == null) continue;
 
                 bool on = record == hovered;
+                Color glow = Color.Lerp(record.Material.color, Color.white, 0.45f) * pulse;
                 record.Material.EnableKeyword("_EMISSION");
-                record.Material.SetColor("_EmissionColor", on ? MarkerGlow * pulse : Color.black);
+                record.Material.SetColor("_EmissionColor", on ? glow : Color.black);
             }
         }
 
         // ------------------------------------------------------------ 上报表单
 
-        private void OpenForm(Vector3 worldPosition)
+        private void OpenForm(Vector3 worldPosition, string deviceId)
         {
             pendingPosition = worldPosition;
+            pendingDeviceId = deviceId ?? string.Empty;
 
             if (pendingMarker != null) Destroy(pendingMarker);
             pendingMarker = CreatePendingMarker(worldPosition);
@@ -259,7 +296,7 @@ namespace VirtualInspection.Reporting
             marker.name = "待提交标记";
             marker.transform.SetParent(transform, false);
             marker.transform.position = position;
-            marker.transform.localScale = Vector3.one * MarkerDiameter;
+            marker.transform.localScale = Vector3.one * PriorityScale(priority);
 
             Collider collider = marker.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
@@ -270,8 +307,9 @@ namespace VirtualInspection.Reporting
                 Shader shader = Shader.Find("Standard");
                 if (shader == null) shader = Shader.Find("Sprites/Default");
                 Material material = new Material(shader);
-                material.color = MarkerColor;
+                material.color = StatusColor("open");
                 renderer.material = material;
+                pendingMaterial = material;
             }
 
             return marker;
@@ -290,6 +328,7 @@ namespace VirtualInspection.Reporting
             {
                 Destroy(pendingMarker);
                 pendingMarker = null;
+                pendingMaterial = null;
             }
 
             HideForm();
@@ -312,6 +351,8 @@ namespace VirtualInspection.Reporting
                 title = title,
                 description = descriptionInput.text ?? string.Empty,
                 priority = priority,
+                deviceId = pendingDeviceId,
+                area = InspectionRegions.Resolve(pendingPosition),
                 location = new IssueLocationDto
                 {
                     x = pendingPosition.x,
@@ -360,6 +401,7 @@ namespace VirtualInspection.Reporting
                 {
                     Destroy(pendingMarker);
                     pendingMarker = null;
+                    pendingMaterial = null;
                 }
 
                 CreateMarkerRecord(id, payload.title, payload.description, payload.priority, status,
@@ -398,6 +440,12 @@ namespace VirtualInspection.Reporting
                 colors.selectedColor = baseColor;
                 pair.Value.colors = colors;
             }
+
+            // 待提交标记随优先级实时变大小（颜色只表示状态，待提交恒为待处理的红色）。
+            if (pendingMarker != null)
+            {
+                pendingMarker.transform.localScale = Vector3.one * PriorityScale(value);
+            }
         }
 
         // ------------------------------------------------------------ 问题详情
@@ -407,6 +455,7 @@ namespace VirtualInspection.Reporting
             infoRecord = record;
             IsFormOpen = true;
 
+            if (infoAccent != null) infoAccent.color = StatusColor(record.Status);
             infoTitle.text = record.Title;
             infoMeta.text = "编号 " + (string.IsNullOrEmpty(record.Id) ? "未同步" : record.Id)
                 + "     优先级 " + IssuePriorityLevel.ToLabel(record.Priority)
@@ -435,6 +484,9 @@ namespace VirtualInspection.Reporting
                         record.Title = items[i].title;
                         record.Description = items[i].description;
                         record.Priority = items[i].priority;
+
+                        // 状态可能被管理端改过，标记外形要跟着变（光环 / 变暗）。
+                        ApplyStatusVisual(record);
 
                         if (infoRecord == record)
                         {
@@ -543,8 +595,8 @@ namespace VirtualInspection.Reporting
             UiFactory.Place(infoPanel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0f, 10f), new Vector2(760f, 384f));
             UiFactory.AddOutline(infoPanel.GetComponent<Image>(), new Color(0.85f, 0.45f, 0.35f, 0.35f));
 
-            RectTransform accent = UiFactory.Panel(infoPanel, "强调条", MarkerColor);
-            UiFactory.Place(accent, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(760f, 3f));
+            infoAccent = UiFactory.Panel(infoPanel, "强调条", MarkerColor).GetComponent<Image>();
+            UiFactory.Place(infoAccent.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), Vector2.zero, new Vector2(760f, 3f));
 
             infoTitle = UiFactory.Label(infoPanel, "问题标题", "", 26, Color.white, TextAnchor.MiddleLeft);
             UiFactory.Place(infoTitle.rectTransform, new Vector2(0f, 1f), new Vector2(0f, 1f), new Vector2(24f, -18f), new Vector2(712f, 36f));
