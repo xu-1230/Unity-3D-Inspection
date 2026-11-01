@@ -1,15 +1,21 @@
-export default function EmptyState() {
+import type { ReactNode } from 'react';
+import { IconInbox } from './Icons';
+
+interface EmptyStateProps {
+  title: string;
+  description: string;
+  action?: ReactNode;
+}
+
+export default function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
-    <p
-      style={{
-        border: '1px dashed #c4c7c5',
-        borderRadius: 8,
-        color: '#5f6368',
-        padding: 24,
-        textAlign: 'center',
-      }}
-    >
-      暂无问题
-    </p>
+    <div className="state">
+      <span className="state__art" aria-hidden="true">
+        <IconInbox />
+      </span>
+      <p className="state__title">{title}</p>
+      <p className="state__desc">{description}</p>
+      {action ? <div className="state__actions">{action}</div> : null}
+    </div>
   );
 }
