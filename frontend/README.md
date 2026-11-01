@@ -17,6 +17,8 @@
 | `src/styles/` | 设计令牌、组件样式与布局样式 |
 | `src/types/` | 与后端契约对应的类型定义（Issue、枚举、视图标识） |
 | `public/` | 不参与打包编译的静态资源 |
+| `Dockerfile` | 多阶段构建：Node 编译 `dist/` → Nginx 托管 |
+| `nginx.conf` | 生产环境入口：SPA 回退、静态资源缓存、`/api` 反代到 `backend:8080` |
 
 ## 命令
 
@@ -36,6 +38,20 @@ npm run preview  # 预览构建产物
 | `VITE_API_BASE_URL` | 空（同源） | Go 后端的基址，不含 `/api`；留空时走 Vite 代理 |
 
 `vite.config.ts` 已把 `/api` 代理到 `http://localhost:8080`，因此开发时前端使用相对路径即可，不依赖跨域配置。
+
+## 容器
+
+生产形态由根目录 `compose.yaml` 编排（`start-docker.cmd` 一键启动）：
+
+- 管理端 <http://localhost:8088>，由 Nginx 托管 `dist/` 并反代 `/api`，与后端同源，不触发跨域。
+- `nginx.conf` 里 `try_files ... /index.html` 负责 SPA 回退，`/assets/` 走长缓存，`/healthz` 供健康检查。
+- 构建期可用 `NPM_REGISTRY` 构建参数切换依赖源，`BASE_REGISTRY` 切换基础镜像源。
+
+单独构建镜像（在 `frontend/` 内）：
+
+```bash
+docker build -t unity-3d-inspection/frontend .
+```
 
 ## 技术规约
 
