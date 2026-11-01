@@ -13,3 +13,8 @@ export function updateIssueStatus(id: string, status: IssueStatus): Promise<Issu
     body: JSON.stringify({ status }),
   });
 }
+
+/** 删除指定问题，后端成功时返回 204。 */
+export function deleteIssue(id: string): Promise<void> {
+  return apiRequest<void>(`/api/issues/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
