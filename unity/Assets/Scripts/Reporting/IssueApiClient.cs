@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -9,10 +10,27 @@ namespace VirtualInspection.Reporting
     /// <summary>唯一发起 HTTP 请求的组件，POST 到 Go 后端的 /api/issues。</summary>
     public class IssueApiClient : MonoBehaviour
     {
-        [Tooltip("后端基址，不带 /api 前缀")]
+        /// <summary>与 exe 同目录的可选配置文件，用于把客户端指向另一台机器的后端。</summary>
+        private const string ConfigFileName = "backend-config.json";
+
+        [Tooltip("后端基址，不带 /api 前缀；会被同目录 backend-config.json 中合法的 baseUrl 覆盖")]
         public string baseUrl = "http://localhost:8080";
 
         public float timeoutSeconds = 10f;
+
+        [Serializable]
+        private class BackendConfig
+        {
+            public string baseUrl;
+        }
+
+        private void Awake()
+        {
+            string configured = LoadConfiguredBaseUrl();
+            if (!string.IsNullOrEmpty(configured)) baseUrl = configured;
+
+            Debug.Log("[巡检客户端] 后端地址：" + baseUrl);
+        }
 
         /// <summary>提交问题；成功回调带回后端保存后的对象，失败回调返回可直接展示的中文原因。</summary>
         public IEnumerator CreateIssue(IssuePayload payload, Action<IssueResponse> onSuccess, Action<string> onError)
@@ -86,6 +104,50 @@ namespace VirtualInspection.Reporting
                 }
 
                 if (onError != null) onError(ExtractMessage(request));
+            }
+        }
+
+        /// <summary>
+        /// 读取 exe 同目录的 backend-config.json。
+        /// 文件缺失、JSON 非法或地址不是 http(s) 时返回 null，调用方保留默认地址。
+        /// </summary>
+        private static string LoadConfiguredBaseUrl()
+        {
+            string directory;
+            try
+            {
+                directory = Path.GetDirectoryName(Application.dataPath);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(directory)) return null;
+
+            string path = Path.Combine(directory, ConfigFileName);
+            if (!File.Exists(path)) return null;
+
+            try
+            {
+                BackendConfig config = JsonUtility.FromJson<BackendConfig>(File.ReadAllText(path));
+                string url = config != null && config.baseUrl != null ? config.baseUrl.Trim() : null;
+                if (string.IsNullOrEmpty(url))
+                {
+                    Debug.LogWarning("[巡检客户端] " + ConfigFileName + " 未提供 baseUrl，继续使用默认地址");
+                    return null;
+                }
+                if (!url.StartsWith("http://") && !url.StartsWith("https://"))
+                {
+                    Debug.LogWarning("[巡检客户端] " + ConfigFileName + " 的 baseUrl 必须以 http:// 或 https:// 开头，已忽略：" + url);
+                    return null;
+                }
+                return url.TrimEnd('/');
+            }
+            catch (Exception error)
+            {
+                Debug.LogWarning("[巡检客户端] 读取 " + ConfigFileName + " 失败，继续使用默认地址：" + error.Message);
+                return null;
             }
         }
 
