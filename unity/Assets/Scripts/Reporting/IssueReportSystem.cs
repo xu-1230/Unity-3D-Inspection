@@ -417,6 +417,9 @@ namespace VirtualInspection.Reporting
 
         private void OpenForm(Vector3 worldPosition, string deviceId)
         {
+            // 每次打开都从干净状态开始，避免上一次取消后残留的输入。
+            ResetFormContent();
+
             pendingPosition = worldPosition;
             pendingDeviceId = deviceId ?? string.Empty;
 
@@ -476,8 +479,18 @@ namespace VirtualInspection.Reporting
                 pendingMaterial = null;
             }
 
+            ResetFormContent();
             HideForm();
             if (player != null) player.SetControls(true);
+        }
+
+        /// <summary>清空标题、描述与状态行，并把优先级复位到「中」。</summary>
+        private void ResetFormContent()
+        {
+            if (titleInput != null) titleInput.text = string.Empty;
+            if (descriptionInput != null) descriptionInput.text = string.Empty;
+            SetStatus(string.Empty, NeutralColor);
+            SetPriority(IssuePriorityLevel.Medium);
         }
 
         private void OnSubmitClicked()
@@ -552,8 +565,7 @@ namespace VirtualInspection.Reporting
                 CreateMarkerRecord(id, payload.title, payload.description, payload.priority, status,
                     System.DateTime.Now.ToString("yyyy-MM-dd'T'HH:mm:ss"), pendingPosition);
 
-                titleInput.text = string.Empty;
-                descriptionInput.text = string.Empty;
+                ResetFormContent();
                 HideForm();
 
                 ShowResult(
