@@ -27,6 +27,7 @@
 | POST | `/api/issues` | 上报并保存问题 |
 | GET | `/api/issues` | 获取问题列表 |
 | PATCH | `/api/issues/{id}/status` | 修改问题状态 |
+| DELETE | `/api/issues/{id}` | 删除问题记录 |
 
 请求与响应均为 JSON，错误统一为 `{"error":{"code","message","field"}}`。
 
