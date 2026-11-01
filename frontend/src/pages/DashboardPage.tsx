@@ -30,11 +30,52 @@ interface ViewMeta {
 
 const TOAST_DURATION_MS = 4200;
 
+/** 后台轮询间隔，与 Unity 客户端保持一致。 */
+const POLL_INTERVAL_MS = 5_000;
+
+/** 对比两次列表，返回一句可直接展示的变更摘要；首次加载或无变化返回空串。 */
+function summarizeChanges(previous: Issue[], next: Issue[]): string {
+  if (previous.length === 0) {
+    return '';
+  }
+
+  const before = new Map(previous.map((issue) => [issue.id, issue]));
+  let added = 0;
+  let changed = 0;
+
+  next.forEach((issue) => {
+    const old = before.get(issue.id);
+    if (!old) {
+      added += 1;
+      return;
+    }
+    if (old.status !== issue.status || old.priority !== issue.priority || old.title !== issue.title) {
+      changed += 1;
+    }
+  });
+
+  const nextIds = new Set(next.map((issue) => issue.id));
+  let removed = 0;
+  previous.forEach((issue) => {
+    if (!nextIds.has(issue.id)) {
+      removed += 1;
+    }
+  });
+
+  const parts: string[] = [];
+  if (added > 0) parts.push(`新增 ${added} 条`);
+  if (changed > 0) parts.push(`变更 ${changed} 条`);
+  if (removed > 0) parts.push(`移除 ${removed} 条`);
+
+  return parts.length === 0 ? '' : `已同步：${parts.join('，')}`;
+}
+
 export default function DashboardPage() {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [view, setView] = useState<ViewKey>('overview');
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [refreshing, setRefreshing] = useState(false);
+  const [offline, setOffline] = useState(false);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
@@ -43,32 +84,73 @@ export default function DashboardPage() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastSeq = useRef(0);
+  /** 上一次成功拉取的数据，用于对比出变更摘要。 */
+  const issuesRef = useRef<Issue[]>([]);
+  /** 本地操作进行中时轮询让路，避免覆盖乐观更新。 */
+  const busyRef = useRef(false);
 
-  const notifyError = useCallback((message: string) => {
+  const pushToast = useCallback((message: string, tone: 'error' | 'info') => {
     toastSeq.current += 1;
     const id = toastSeq.current;
-    setToasts((previous) => [...previous, { id, message }]);
+    setToasts((previous) => [...previous, { id, message, tone }]);
     window.setTimeout(() => {
       setToasts((previous) => previous.filter((item) => item.id !== id));
     }, TOAST_DURATION_MS);
   }, []);
 
+  const notifyError = useCallback((message: string) => pushToast(message, 'error'), [pushToast]);
+  const notifyInfo = useCallback((message: string) => pushToast(message, 'info'), [pushToast]);
+
   const load = useCallback(async () => {
     setRefreshing(true);
     try {
       const issues = await listIssues();
+      const summary = summarizeChanges(issuesRef.current, issues);
+
       setState({ kind: 'ready', issues });
+      issuesRef.current = issues;
       setLastSync(new Date().toISOString());
+      setOffline(false);
+
+      if (summary !== '') {
+        notifyInfo(summary);
+      }
     } catch (error) {
-      setState({ kind: 'error', message: describeError(error) });
+      // 后台轮询失败不该把已经渲染好的界面换成错误页，保留旧数据并标记离线。
+      setState((previous) =>
+        previous.kind === 'ready' ? previous : { kind: 'error', message: describeError(error) },
+      );
+      setOffline(true);
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [notifyInfo]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 后台轮询：页面不可见或本地正在改动数据时跳过，回到前台立即补一次。
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.hidden || busyRef.current) return;
+      void load();
+    }, POLL_INTERVAL_MS);
+
+    const handleVisible = () => {
+      if (document.hidden || busyRef.current) return;
+      void load();
+    };
+
+    document.addEventListener('visibilitychange', handleVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisible);
+    };
+  }, [load]);
+
+  busyRef.current = busyId !== null || deleting || pendingDelete !== null;
 
   const issues = state.kind === 'ready' ? state.issues : [];
   const counts = useMemo(() => countStatuses(issues), [issues]);
@@ -137,7 +219,13 @@ export default function DashboardPage() {
   const resetFilters = () => setFilters(EMPTY_FILTERS);
 
   const connection: ConnectionState =
-    state.kind === 'ready' ? 'online' : state.kind === 'error' ? 'offline' : 'loading';
+    state.kind === 'error'
+      ? 'offline'
+      : state.kind === 'ready'
+        ? offline
+          ? 'offline'
+          : 'online'
+        : 'loading';
 
   const fixedZoneCount = zones.filter((zone) => zone.fixed).length;
 
