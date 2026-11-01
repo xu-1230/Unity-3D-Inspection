@@ -278,6 +278,57 @@ func TestUpdateStatusErrors(t *testing.T) {
 	}
 }
 
+func TestCreateIssueKeepsOptionalDeviceAndArea(t *testing.T) {
+	srv := newTestServer(t)
+
+	body := `{"title":"柜A顶部渗水","priority":"medium","deviceId":"  CB-101  ","area":"A区 1F","location":{"x":0,"y":1,"z":0}}`
+	resp, payload := call(t, srv, http.MethodPost, "/api/issues", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("期望 201，实际 %d：%s", resp.StatusCode, payload)
+	}
+
+	created := decodeIssue(t, payload)
+	if created.DeviceID != "CB-101" || created.Area != "A区 1F" {
+		t.Fatalf("设备与区域字段未按预期保存：deviceId=%q area=%q", created.DeviceID, created.Area)
+	}
+
+	resp, payload = call(t, srv, http.MethodPost, "/api/issues",
+		`{"title":"未标注设备","priority":"low","location":{"x":0,"y":0,"z":0}}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("缺省设备字段不应导致失败，实际 %d：%s", resp.StatusCode, payload)
+	}
+	if bare := decodeIssue(t, payload); bare.DeviceID != "" || bare.Area != "" {
+		t.Fatalf("缺省时应为空串：deviceId=%q area=%q", bare.DeviceID, bare.Area)
+	}
+}
+
+func TestDeleteIssueRemovesIt(t *testing.T) {
+	srv := newTestServer(t)
+	created := createIssue(t, srv)
+
+	resp, payload := call(t, srv, http.MethodDelete, "/api/issues/"+created.ID, "")
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("期望 204，实际 %d：%s", resp.StatusCode, payload)
+	}
+
+	_, payload = call(t, srv, http.MethodGet, "/api/issues", "")
+	if string(bytes.TrimSpace(payload)) != "[]" {
+		t.Fatalf("删除后列表应为空，实际 %s", payload)
+	}
+}
+
+func TestDeleteIssueUnknownID(t *testing.T) {
+	srv := newTestServer(t)
+
+	resp, payload := call(t, srv, http.MethodDelete, "/api/issues/missing", "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("期望 404，实际 %d：%s", resp.StatusCode, payload)
+	}
+	if detail := decodeError(t, payload); detail.Code != codeNotFound {
+		t.Fatalf("期望错误码 %s，实际 %s", codeNotFound, detail.Code)
+	}
+}
+
 func TestCORSAllowsLocalOrigin(t *testing.T) {
 	srv := newTestServer(t)
 

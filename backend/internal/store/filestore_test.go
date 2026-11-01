@@ -159,6 +159,44 @@ func TestFileStoreUpdateStatusUnknownID(t *testing.T) {
 	}
 }
 
+func TestFileStoreDeleteRemovesAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data", "issues.json")
+	s, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("创建存储失败：%v", err)
+	}
+	if _, err := s.Create(issueFixture("keep")); err != nil {
+		t.Fatalf("创建失败：%v", err)
+	}
+	if _, err := s.Create(issueFixture("drop")); err != nil {
+		t.Fatalf("创建失败：%v", err)
+	}
+
+	if err := s.Delete("drop"); err != nil {
+		t.Fatalf("删除失败：%v", err)
+	}
+
+	reloaded, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("重新加载失败：%v", err)
+	}
+	list, err := reloaded.List()
+	if err != nil {
+		t.Fatalf("查询失败：%v", err)
+	}
+	if len(list) != 1 || list[0].ID != "keep" {
+		t.Fatalf("删除结果未落盘：%+v", list)
+	}
+}
+
+func TestFileStoreDeleteUnknownID(t *testing.T) {
+	s := newStore(t)
+
+	if err := s.Delete("missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("期望 ErrNotFound，实际 %v", err)
+	}
+}
+
 func TestFileStoreConcurrentCreateKeepsEveryIssue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "data", "issues.json")
 	s, err := NewFileStore(path)

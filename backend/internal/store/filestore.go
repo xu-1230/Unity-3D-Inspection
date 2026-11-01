@@ -104,6 +104,30 @@ func (s *FileStore) UpdateStatus(id string, status model.Status) (model.Issue, e
 	return model.Issue{}, ErrNotFound
 }
 
+// Delete 移除指定问题并落盘，失败时恢复原有集合。
+func (s *FileStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := range s.issues {
+		if s.issues[i].ID != id {
+			continue
+		}
+		previous := s.issues
+		next := make([]model.Issue, 0, len(previous)-1)
+		next = append(next, previous[:i]...)
+		next = append(next, previous[i+1:]...)
+
+		s.issues = next
+		if err := s.saveLocked(); err != nil {
+			s.issues = previous
+			return err
+		}
+		return nil
+	}
+	return ErrNotFound
+}
+
 // saveLocked 先写临时文件再原子重命名，避免半写损坏。调用方须持有锁。
 func (s *FileStore) saveLocked() error {
 	dir := filepath.Dir(s.path)

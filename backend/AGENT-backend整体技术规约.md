@@ -48,7 +48,7 @@ type Store interface {
 - 请求体解析使用 `json.Decoder` 并拒绝未知字段之外的类型错误；请求体大小限制在 1 MB 以内。
 - 时间统一 `time.Now().UTC()`，序列化为 RFC3339 字符串。
 - 日志记录启动端口、监听失败、存储读写失败、请求方法与路径与状态码；不记录完整请求体。
-- 测试文件与被测文件同包同目录，命名 `<file>_test.go`；存储层与校验函数需覆盖正常与错误分支，处理器用 `httptest` 覆盖 4 个端点。
+- 测试文件与被测文件同包同目录，命名 `<file>_test.go`；存储层与校验函数需覆盖正常与错误分支，处理器用 `httptest` 覆盖 5 个端点。
 
 ## 6 契约与数据
 
@@ -60,10 +60,13 @@ type Store interface {
 | POST | `/api/issues` | 201 完整对象 | 400 |
 | GET | `/api/issues` | 200 数组，按 `createdAt` 倒序 | 500 |
 | PATCH | `/api/issues/{id}/status` | 200 更新后对象 | 400 / 404 |
+| DELETE | `/api/issues/{id}` | 204 无响应体 | 404 |
 
 **标识**：创建时由服务端生成，取 UUID v4 或 `crypto/rand` 生成的 32 位十六进制串；同一进程内不与已有标识重复。
 
 **服务端字段**：`status` 创建时固定 `open`；`createdAt` 与 `updatedAt` 创建时同值写入，状态变更时只刷新 `updatedAt`。请求体中的 `id`、`status`、`createdAt`、`updatedAt` 一律忽略。
+
+**可选描述字段**：`deviceId` 与 `area` 缺失或为空白时存为空字符串，不做校验拦截；两者长度上限 64 字符（按 rune 截断），供管理端筛选与分组使用，不参与状态机。
 
 **状态机**：三态任意互转（含目标与当前相同的幂等情形），合法性只要求取值属于 `open`、`in_progress`、`resolved`；非法值返回 400 `INVALID_STATUS`。不实现单向流转限制。
 
@@ -75,7 +78,7 @@ type Store interface {
 - 存储路径默认 `data/`（已在 `.gitignore` 中），可用环境变量覆盖；路径不随启动目录变化。
 - 对写操作加互斥（互斥量或单写入协程），并发创建时每个问题都获得唯一标识并全部保存。
 
-**跨域**：允许 `http://localhost` 与 `http://127.0.0.1` 的任意端口来源，允许方法 `GET`、`POST`、`PATCH`、`OPTIONS`，允许请求头 `Content-Type`；`OPTIONS` 返回 204。不使用 Cookie，不开启凭据模式。
+**跨域**：允许 `http://localhost` 与 `http://127.0.0.1` 的任意端口来源，允许方法 `GET`、`POST`、`PATCH`、`DELETE`、`OPTIONS`，允许请求头 `Content-Type`；`OPTIONS` 返回 204。不使用 Cookie，不开启凭据模式。
 
 **错误处理**：存储失败返回 500 `INTERNAL`，响应体不包含文件路径、SQL 语句或驱动错误原文，只记入日志。
 
@@ -94,9 +97,10 @@ curl.exe -s http://localhost:8080/api/health
 curl.exe -s -X POST http://localhost:8080/api/issues -H "Content-Type: application/json" -d "{\"title\":\"cabinet-a-leak\",\"priority\":\"high\",\"location\":{\"x\":1.0,\"y\":2.0,\"z\":3.0}}"
 curl.exe -s http://localhost:8080/api/issues
 curl.exe -s -X PATCH http://localhost:8080/api/issues/<id>/status -H "Content-Type: application/json" -d "{\"status\":\"resolved\"}"
+curl.exe -s -o NUL -w "%{http_code}" -X DELETE http://localhost:8080/api/issues/<id>
 ```
 
-冒烟通过标准：创建返回 201 且 `status` 为 `open`；列表包含刚创建的问题；改状态返回 200 且 `updatedAt` 变化；重启服务后列表内容不变；`title` 为空返回 400 `INVALID_TITLE`；`priority` 取 `urgent` 返回 400 `INVALID_PRIORITY`。
+冒烟通过标准：创建返回 201 且 `status` 为 `open`；列表包含刚创建的问题；改状态返回 200 且 `updatedAt` 变化；删除返回 204 且列表中不再包含该问题；重启服务后列表内容不变；`title` 为空返回 400 `INVALID_TITLE`；`priority` 取 `urgent` 返回 400 `INVALID_PRIORITY`。
 
 当前开发机未安装 Go 工具链，上述命令无法在本环境执行；提交说明中标注「未执行」及原因。
 

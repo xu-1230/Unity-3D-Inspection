@@ -13,5 +13,6 @@ func NewRouter(st store.Store) http.Handler {
 	mux.HandleFunc("POST /api/issues", handleCreate(st))
 	mux.HandleFunc("GET /api/issues", handleList(st))
 	mux.HandleFunc("PATCH /api/issues/{id}/status", handleUpdateStatus(st))
+	mux.HandleFunc("DELETE /api/issues/{id}", handleDelete(st))
 	return withCORS(mux)
 }
